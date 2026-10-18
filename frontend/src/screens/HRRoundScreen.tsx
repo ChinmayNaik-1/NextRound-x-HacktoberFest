@@ -49,13 +49,18 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
 
   const speechRecognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasStartedRef = useRef<boolean>(false);
+  const isSendingRef = useRef<boolean>(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Initial HR Greeting & First Question
+  // Initial HR Greeting & First Question (guarded against double execution)
   useEffect(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
     async function startHR() {
       const opener = `Welcome ${config.candidate_name} to the HR & Behavioral interview for ${config.company}. I'd love to learn more about your working style, team collaboration, and what drives you. To start, could you give me a brief overview of yourself and what specifically attracted you to this role at ${config.company}?`;
 
@@ -194,7 +199,9 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
   };
 
   const handleUserResponse = async (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || isSendingRef.current) return;
+    isSendingRef.current = true;
+
     if (isListeningMic) {
       await stopMicRecognition();
     }
@@ -203,20 +210,26 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
     setAiStatus('thinking');
     setAiCaption("Evaluating your answer and structuring follow-up...");
 
-    const reply = await sendInterviewChat(
-      'hr',
-      config.company,
-      config.role,
-      [...chatMessages, { id: 'usr', role: 'user', content: text, timestamp: '' }],
-      config.resume_text,
-      config.additional_context,
-      config.provider,
-      config.api_key,
-      config.key_id
-    );
+    try {
+      const reply = await sendInterviewChat(
+        'hr',
+        config.company,
+        config.role,
+        [...chatMessages, { id: 'usr', role: 'user', content: text, timestamp: '' }],
+        config.resume_text,
+        config.additional_context,
+        config.provider,
+        config.api_key,
+        config.key_id
+      );
 
-    addMessage("assistant", reply);
-    speakText(reply);
+      addMessage("assistant", reply);
+      speakText(reply);
+    } catch (err) {
+      console.error("HR handleUserResponse error:", err);
+    } finally {
+      isSendingRef.current = false;
+    }
   };
 
 
@@ -233,7 +246,7 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-white text-[#1A1A1A] overflow-hidden">
+    <div className="flex flex-col flex-1 bg-white text-[#1A1A1A] overflow-hidden">
       {/* Top Bar */}
       <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shrink-0 shadow-sm">
         <div className="flex items-center gap-3">
