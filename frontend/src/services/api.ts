@@ -395,25 +395,56 @@ export async function analyzeCode(
 
 // ---------------- Resume Parsing ----------------
 
+/** Client-side resume skill extraction — works fully offline, no backend needed. */
+export function parseResumeTextLocal(text: string): { raw_text: string; detected_skills: string[]; summary: string } {
+  const COMMON_SKILLS = [
+    "Python", "Java", "C++", "JavaScript", "TypeScript", "React", "Node.js", "Docker",
+    "Kubernetes", "AWS", "SQL", "PostgreSQL", "MongoDB", "Git", "REST APIs", "FastAPI",
+    "Machine Learning", "Deep Learning", "PyTorch", "TensorFlow", "NLP", "LLM", "System Design",
+    "Go", "Rust", "Swift", "Kotlin", "GraphQL", "Redis", "Linux", "CI/CD", "Terraform",
+    "Spring Boot", "Django", "Flask", "Next.js", "Vue", "Angular", "MySQL", "Elasticsearch"
+  ];
+  const lower = text.toLowerCase();
+  const detected_skills = COMMON_SKILLS.filter(s => lower.includes(s.toLowerCase()));
+  return {
+    raw_text: text.trim(),
+    detected_skills,
+    summary: text.slice(0, 500) + (text.length > 500 ? "..." : "")
+  };
+}
+
 export async function parseResumePdf(file: File): Promise<{ raw_text: string; detected_skills: string[]; summary: string }> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE}/resume/parse-pdf`, {
-    method: "POST",
-    body: formData
-  });
-  if (!res.ok) throw new Error("Failed to parse PDF resume");
-  return await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/resume/parse-pdf`, {
+      method: "POST",
+      body: formData
+    });
+    if (res.ok) return await res.json();
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || "Failed to parse PDF resume");
+  } catch (e: any) {
+    // If it's a network error (backend offline), surface a clear message
+    if (e.message === "Failed to fetch" || e.name === "TypeError") {
+      throw new Error("BACKEND_OFFLINE");
+    }
+    throw e;
+  }
 }
 
 export async function parseResumeText(text: string): Promise<{ raw_text: string; detected_skills: string[]; summary: string }> {
-  const res = await fetch(`${API_BASE}/resume/parse-text`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
-  });
-  if (!res.ok) throw new Error("Failed to parse text resume");
-  return await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/resume/parse-text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text })
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    // Backend offline — fall back to local parsing silently
+  }
+  return parseResumeTextLocal(text);
 }
 
 // ---------------- Interview Sessions ----------------

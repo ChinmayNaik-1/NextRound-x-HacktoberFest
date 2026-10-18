@@ -277,37 +277,64 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
     try {
       let rawText = "";
       let skills: string[] = [];
+
       if (file.type === "application/pdf") {
-        const res = await parseResumePdf(file);
-        rawText = res.raw_text;
-        skills = res.detected_skills || [];
+        // PDF parsing requires the backend — handle gracefully if offline
+        try {
+          const res = await parseResumePdf(file);
+          rawText = res.raw_text;
+          skills = res.detected_skills || [];
+        } catch (pdfErr: any) {
+          if (pdfErr.message === "BACKEND_OFFLINE") {
+            setNotification({
+              type: 'info',
+              text: "⚠️ Backend is starting up — PDF parsing needs it. Try again in a moment, or paste your resume text instead."
+            });
+          } else {
+            setNotification({ type: 'info', text: `Could not parse PDF: ${pdfErr.message}. Please paste your resume text instead.` });
+          }
+          setIsParsingResume(false);
+          return;
+        }
       } else {
+        // TXT / plain-text: parse on the frontend, backend called for richer extraction but falls back offline
         const text = await file.text();
         const res = await parseResumeText(text);
         rawText = res.raw_text;
         skills = res.detected_skills || [];
       }
+
       setResumeText(rawText);
       setDetectedSkills(skills);
 
       // Automatically persist to database so candidate never has to re-upload
       if (rawText.trim()) {
         const titleToSave = baseTitle || `${candidateName || 'Candidate'}'s Resume`;
-        const saveRes = await addSavedResume(titleToSave, rawText, candidateName, file.name, skills);
-        if (saveRes?.resume) {
-          const updated = await fetchResumes();
-          setSavedResumes(updated.resumes);
-          setSelectedResumeId(saveRes.resume.id);
-          syncProfile({
-            candidate_name: candidateName,
-            active_resume_id: saveRes.resume.id,
-            resume_text: rawText
-          });
-          setNotification({
-            type: 'success',
-            text: `Resume "${titleToSave}" uploaded and saved to your profiles!`
-          });
-          setTimeout(() => setNotification(null), 4000);
+        try {
+          const saveRes = await addSavedResume(titleToSave, rawText, candidateName, file.name, skills);
+          if (saveRes?.resume) {
+            const updated = await fetchResumes();
+            setSavedResumes(updated.resumes);
+            setSelectedResumeId(saveRes.resume.id);
+            syncProfile({
+              candidate_name: candidateName,
+              active_resume_id: saveRes.resume.id,
+              resume_text: rawText
+            });
+            setNotification({
+              type: 'success',
+              text: `Resume "${titleToSave}" uploaded and saved to your profiles!`
+            });
+          } else {
+            syncProfile({ resume_text: rawText });
+            setNotification({ type: 'info', text: `Resume loaded for this session. Click "Save to Profiles Library" below to persist it.` });
+          }
+          setTimeout(() => setNotification(null), 5000);
+        } catch {
+          // DB save failed (backend may be offline) — resume text is still loaded in the editor
+          syncProfile({ resume_text: rawText });
+          setNotification({ type: 'info', text: `Resume loaded! Backend offline — click "Save to Profiles Library" once the app starts to persist it.` });
+          setTimeout(() => setNotification(null), 6000);
         }
       }
     } catch (err: any) {

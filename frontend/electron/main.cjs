@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const http = require('http');
 
 // Auto-allow camera & microphone streams without headless prompt hang
 app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
@@ -26,9 +27,44 @@ function startBackend() {
     backendProcess.on('error', (err) => {
       console.warn('Backend process error:', err);
     });
+
+    backendProcess.on('exit', (code) => {
+      if (code !== 0 && code !== null) {
+        console.warn(`Backend exited with code ${code}`);
+      }
+    });
   } catch (err) {
     console.warn('Could not launch backend subprocess automatically:', err);
   }
+}
+
+/** Poll /api/health until backend is up or timeout reached. */
+function waitForBackend(maxWaitMs = 12000, intervalMs = 500) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    function check() {
+      const req = http.get('http://127.0.0.1:8000/api/health', (res) => {
+        if (res.statusCode === 200) {
+          console.log('[Electron] Backend is ready.');
+          resolve(true);
+        } else {
+          retry();
+        }
+        res.resume(); // drain the response
+      });
+      req.on('error', retry);
+      req.setTimeout(400, () => { req.destroy(); retry(); });
+    }
+    function retry() {
+      if (Date.now() - start >= maxWaitMs) {
+        console.warn('[Electron] Backend did not start in time — opening app anyway.');
+        resolve(false);
+      } else {
+        setTimeout(check, intervalMs);
+      }
+    }
+    check();
+  });
 }
 
 function createWindow() {
@@ -80,7 +116,7 @@ ipcMain.on('toggle-fullscreen', () => {
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Automatically permit camera and microphone in Electron
   if (session && session.defaultSession) {
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
@@ -97,6 +133,8 @@ app.whenReady().then(() => {
   }
 
   startBackend();
+  // Wait for backend to be healthy before opening the window (up to 12s)
+  await waitForBackend(12000, 500);
   createWindow();
 
   app.on('activate', () => {
