@@ -1,6 +1,6 @@
 # InterviewAI PowerShell Launcher
 Write-Host "========================================================" -ForegroundColor Cyan
-Write-Host " Google Antigravity - InterviewAI Desktop Platform" -ForegroundColor White
+Write-Host " NextRound - InterviewAI Desktop Platform" -ForegroundColor White
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host ""
 

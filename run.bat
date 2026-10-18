@@ -1,7 +1,7 @@
 @echo off
 title InterviewAI - Antigravity Desktop Platform
 echo ========================================================
-echo  Google Antigravity - InterviewAI Desktop Platform
+echo  NextRound - InterviewAI Desktop Platform
 echo ========================================================
 echo.
 

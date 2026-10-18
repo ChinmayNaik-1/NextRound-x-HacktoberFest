@@ -114,7 +114,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
 
   return (
     <div className="relative min-h-screen bg-white text-[#1A1A1A] pb-20 select-text">
-      {/* Google Antigravity Confetti Particles */}
+      {/* NextRound Confetti Particles */}
       <ParticleCanvas count={100} />
 
       <div className="relative z-10 max-w-4xl mx-auto px-6 pt-10 space-y-10">

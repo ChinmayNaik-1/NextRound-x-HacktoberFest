@@ -40,7 +40,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="flex items-center gap-2">
           <span className="font-medium text-[1.125rem] tracking-tight text-[#1A1A1A]">
-            Google Antigravity
+            NextRound
           </span>
           <span className="text-gray-300 font-light">|</span>
           <span className="text-sm font-normal text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-pill flex items-center gap-1.5">

@@ -33,7 +33,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Google Antigravity | InterviewAI',
+    title: 'NextRound | InterviewAI',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
