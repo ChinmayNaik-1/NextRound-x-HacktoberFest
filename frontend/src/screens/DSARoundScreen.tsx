@@ -545,7 +545,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
         
         {/* Left Pane: Question Description (LeetCode Style) */}
         <div
-          className="min-w-0 bg-white flex flex-col overflow-y-auto p-6"
+          className="min-h-0 min-w-0 bg-white flex flex-col overflow-y-auto p-6"
           style={{ flex: `0 0 ${problemPanePercent}%` }}
         >
           {question ? (

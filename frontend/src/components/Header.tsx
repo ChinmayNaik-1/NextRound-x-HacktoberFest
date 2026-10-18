@@ -17,7 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   const themeAction = theme === 'light' ? 'Dark' : 'Light';
 
   return (
-    <header className="sticky top-0 z-30 w-full bg-white/90 backdrop-blur-md border-b border-[#EBEBEB] px-6 py-3.5 flex items-center justify-between">
+    <header className="sticky top-0 z-30 w-full shrink-0 bg-white/90 backdrop-blur-md border-b border-[#EBEBEB] px-6 py-3.5 flex items-center justify-between">
       {/* Brand Logo & Name */}
       <div className="flex items-center gap-3">
         <img
