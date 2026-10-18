@@ -106,6 +106,105 @@ body {
   transition: background-color 180ms ease, color 180ms ease;
 }
 
+.problem-markdown {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.problem-markdown :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 1.25rem 0 0.65rem;
+}
+
+.problem-markdown h1 {
+  font-size: 1.35rem;
+}
+
+.problem-markdown h2 {
+  font-size: 1.2rem;
+}
+
+.problem-markdown h3 {
+  font-size: 1.05rem;
+}
+
+.problem-markdown :is(p, ul, ol, blockquote, pre) {
+  margin: 0 0 0.9rem;
+}
+
+.problem-markdown ul,
+.problem-markdown ol {
+  padding-left: 1.5rem;
+}
+
+.problem-markdown ul {
+  list-style: disc;
+}
+
+.problem-markdown ol {
+  list-style: decimal;
+}
+
+.problem-markdown li {
+  padding-left: 0.15rem;
+}
+
+.problem-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.problem-markdown li > :is(p, ul, ol) {
+  margin-top: 0.35rem;
+}
+
+.problem-markdown :not(pre) > code {
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 0.3rem;
+  color: var(--text-primary);
+  font-family: 'Google Sans Code', Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.1rem 0.3rem;
+}
+
+.problem-markdown pre {
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 0.6rem;
+  overflow-x: auto;
+  padding: 0.85rem 1rem;
+}
+
+.problem-markdown pre code {
+  color: var(--text-primary);
+  font-family: 'Google Sans Code', Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.problem-markdown blockquote {
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+  padding-left: 0.85rem;
+}
+
+.problem-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  margin: 1.25rem 0;
+}
+
+.problem-markdown a {
+  color: var(--color-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 body :is(
   .bg-white,
   [class~="bg-white/90"],

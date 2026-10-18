@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
+import ReactMarkdown from 'react-markdown';
 import {
   Play,
   Send,
@@ -453,8 +454,8 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
               </div>
 
               {/* Markdown Problem Description */}
-              <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed space-y-3 font-sans">
-                <div dangerouslySetInnerHTML={{ __html: question.description.replace(/\n/g, '<br/>') }} />
+              <div className="problem-markdown">
+                <ReactMarkdown>{question.description}</ReactMarkdown>
               </div>
 
               {/* Code Analysis Summary (If Submitted) */}
