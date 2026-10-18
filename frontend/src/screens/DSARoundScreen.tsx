@@ -69,6 +69,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const recordingTimerRef = useRef<any>(null);
   const [isAnalyzingApproach, setIsAnalyzingApproach] = useState(false);
+  const responseTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [codeAnalysis, setCodeAnalysis] = useState<CodeAnalysis | null>(null);
   const [showSkipModal, setShowSkipModal] = useState(false);
@@ -79,6 +80,18 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
     const caption = aiCaptionRef.current;
     if (caption) caption.scrollTop = caption.scrollHeight;
   }, [aiCaption]);
+
+  useEffect(() => {
+    const textarea = responseTextareaRef.current;
+    if (!textarea) return;
+
+    const maxHeight = 144;
+    textarea.style.height = 'auto';
+    const contentHeight = textarea.scrollHeight;
+    textarea.style.height = `${Math.min(contentHeight, maxHeight)}px`;
+    textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
+    textarea.scrollTop = textarea.scrollHeight;
+  }, [userInputText]);
 
   const compactPrompt = (text: string) => {
     const question = text.match(/[^.!?]*\?/g)?.at(-1)?.trim() || text.trim();
@@ -756,6 +769,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
 
             {/* Multi-line Textarea */}
             <textarea
+              ref={responseTextareaRef}
               rows={2}
               value={userInputText}
               onChange={(e) => setUserInputText(e.target.value)}
