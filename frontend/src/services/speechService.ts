@@ -111,7 +111,8 @@ export class SpeechService {
     rawText: string,
     onStart?: () => void,
     onEnd?: () => void,
-    onError?: (err: any) => void
+    onError?: (err: any) => void,
+    onProgress?: (spokenText: string) => void
   ): void {
     if (!window.speechSynthesis) {
       if (onError) onError(new Error("Speech synthesis not supported"));
@@ -195,6 +196,13 @@ export class SpeechService {
           started = true;
           if (onStart) onStart();
         }
+      };
+
+      utterance.onboundary = (event) => {
+        if (event.name !== 'word' || !onProgress) return;
+        const spokenPrefix = chunks.slice(0, idx).join(' ');
+        const currentPrefix = chunkText.slice(0, event.charIndex + (event.charLength || 0));
+        onProgress([spokenPrefix, currentPrefix].filter(Boolean).join(' '));
       };
 
       utterance.onend = () => {
@@ -429,4 +437,3 @@ export class SpeechService {
     return SpeechService.isListening;
   }
 }
-

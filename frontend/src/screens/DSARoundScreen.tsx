@@ -61,6 +61,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [isGreetingPhase, setIsGreetingPhase] = useState(true);
   const [aiStatus, setAiStatus] = useState<'idle' | 'listening' | 'speaking' | 'thinking'>('speaking');
   const [aiCaption, setAiCaption] = useState("Interviewer is introducing the problem...");
+  const aiCaptionRef = useRef<HTMLParagraphElement>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isListeningMic, setIsListeningMic] = useState(false);
   const [userInputText, setUserInputText] = useState("");
@@ -74,6 +75,21 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
 
   const speechRecognitionRef = useRef<any>(null);
 
+  useEffect(() => {
+    const caption = aiCaptionRef.current;
+    if (caption) caption.scrollTop = caption.scrollHeight;
+  }, [aiCaption]);
+
+  const compactPrompt = (text: string) => {
+    const question = text.match(/[^.!?]*\?/g)?.at(-1)?.trim() || text.trim();
+    const prompt = question
+      .replace(/^(?:could you|can you|would you|please)\s+/i, '')
+      .replace(/[?!.]+$/, '')
+      .trim();
+    const normalized = prompt ? prompt[0].toUpperCase() + prompt.slice(1) : "Ready for questions";
+    return normalized.length > 72 ? `${normalized.slice(0, 69).trimEnd()}...` : normalized;
+  };
+
   // 1. Fetch Company Question
   useEffect(() => {
     async function init() {
@@ -83,7 +99,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
 
       // Welcome voice message
       const greeting = `Welcome ${config.candidate_name} to your ${roundName} for ${config.company}. You have 25 minutes to review the problem and submit an optimal solution. Feel free to explain your approach aloud as you code.`;
-      speakText(greeting);
+      speakText(greeting, "Review the problem");
       addMessage("assistant", greeting);
     }
     init();
@@ -114,7 +130,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   }, [isRunning]);
 
   const handleTimeExpired = () => {
-    speakText("Time is up for this coding problem. Let's move on to analyzing your approach.");
+    speakText("Time is up for this coding problem. Let's move on to analyzing your approach.", "Review your approach");
     handleSubmission(false);
   };
 
@@ -133,23 +149,23 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   }, []);
 
   // 3. SpeechService (TTS & STT with push-to-talk & interruption)
-  const speakText = (text: string) => {
+  const speakText = (text: string, finishedCaption = compactPrompt(text)) => {
     setAiStatus('speaking');
     setAiCaption(text);
     SpeechService.speak(
       text,
       () => {
         setAiStatus('speaking');
-        setAiCaption(text);
       },
       () => {
         setAiStatus('idle');
-        setAiCaption("AI Interviewer is observing. Feel free to ask questions or discuss your approach.");
+        setAiCaption(finishedCaption);
       },
       () => {
         setAiStatus('idle');
-        setAiCaption("Ready for questions or discussion.");
-      }
+        setAiCaption(finishedCaption);
+      },
+      setAiCaption
     );
   };
 
@@ -346,10 +362,11 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
       setCodeAnalysis(analysis);
 
       const passMsg = `Submission processed. You passed ${fullReport.passed_cases} out of ${fullReport.total_cases} test cases.`;
+      const followUp = analysis.follow_up_questions[0] || "Can you explain your complexity trade-offs?";
       if (speakConfirmation) {
-        speakText(passMsg + " " + (analysis.follow_up_questions[0] || "Can you explain your complexity trade-offs?"));
+        speakText(`${passMsg} ${followUp}`, compactPrompt(followUp));
       }
-      addMessage("assistant", passMsg + " Let's discuss your approach: " + (analysis.follow_up_questions[0] || ""));
+      addMessage("assistant", passMsg + " Let's discuss your approach: " + followUp);
     } catch (err) {
       console.error("Submission failed", err);
     } finally {
@@ -646,7 +663,10 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
               </span>
               <span className="w-1.5 h-1.5 rounded-full bg-brand-green animate-ping" />
             </div>
-            <p className="text-xs text-gray-600 max-w-xs truncate">
+            <p
+              ref={aiCaptionRef}
+              className="text-xs text-gray-600 max-w-xs max-h-12 overflow-y-auto whitespace-normal break-words"
+            >
               {aiCaption}
             </p>
           </div>
