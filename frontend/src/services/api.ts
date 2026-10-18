@@ -301,6 +301,16 @@ export async function fetchInterviewHistory(): Promise<PastInterview[]> {
   return [];
 }
 
+export async function deleteInterviewHistory(interviewId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/interview/history/${encodeURIComponent(interviewId)}`, {
+    method: "DELETE"
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed to delete interview" }));
+    throw new Error(err.detail || "Failed to delete interview");
+  }
+}
+
 // ---------------- Questions ----------------
 
 export async function fetchCompanyQuestion(company: string, difficulty: string): Promise<Question> {

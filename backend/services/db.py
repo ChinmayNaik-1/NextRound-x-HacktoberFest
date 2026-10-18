@@ -216,6 +216,15 @@ def list_past_interviews() -> List[Dict[str, Any]]:
         results.append(d)
     return results
 
+def delete_interview(interview_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM interviews WHERE id = ?", (interview_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
 # ----------------- Resumes Management -----------------
 
 def add_resume(title: str, raw_text: str, candidate_name: str = "", file_name: str = "", detected_skills: Optional[List[str]] = None, make_active: bool = True) -> Dict[str, Any]:

@@ -24,7 +24,8 @@ import {
   verifyApiKey,
   deleteNamedKey,
   activateNamedKey,
-  fetchInterviewHistory
+  fetchInterviewHistory,
+  deleteInterviewHistory
 } from '../services/api';
 import { ParticleCanvas } from '../components/ParticleCanvas';
 
@@ -50,6 +51,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   // Past Interviews State
   const [pastInterviews, setPastInterviews] = useState<PastInterview[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [deletingInterviewId, setDeletingInterviewId] = useState<string | null>(null);
 
   // Load Named Keys & Past Interviews on mount with cold-start retry
   useEffect(() => {
@@ -142,6 +144,22 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   const handleSelectKey = async (id: string) => {
     setSelectedKeyId(id);
     await activateNamedKey(id);
+  };
+
+  const handleDeleteInterview = async (interview: PastInterview) => {
+    const label = `${interview.company} interview from ${new Date(interview.created_at).toLocaleDateString()}`;
+    if (!window.confirm(`Delete this ${label} and its saved score? This cannot be undone.`)) return;
+
+    setDeletingInterviewId(interview.id);
+    try {
+      await deleteInterviewHistory(interview.id);
+      setPastInterviews((items) => items.filter((item) => item.id !== interview.id));
+    } catch (err) {
+      console.error("Failed to delete interview history", err);
+      alert(err instanceof Error ? err.message : "Failed to delete interview. Please try again.");
+    } finally {
+      setDeletingInterviewId(null);
+    }
   };
 
   const selectedKeyObj = keys.find((k) => k.id === selectedKeyId) || null;
@@ -413,6 +431,16 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                           <ArrowRight className="w-3 h-3" />
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteInterview(item)}
+                        disabled={deletingInterviewId === item.id}
+                        className="p-2 text-gray-400 hover:text-brand-red hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                        title="Delete interview score"
+                        aria-label={`Delete ${item.company} interview from ${new Date(item.created_at).toLocaleDateString()}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 );
