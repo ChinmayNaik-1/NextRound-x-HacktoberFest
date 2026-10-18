@@ -1,554 +1,269 @@
-import sys
-import os
-import subprocess
-import tempfile
-import time
 import json
-import re
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-def normalize_output(s: str) -> str:
-    if s is None:
-        return ""
-    clean = s.strip()
-    if clean in ("True", "true"):
-        return "true"
-    if clean in ("False", "false"):
-        return "false"
-    
-    # Try JSON parsing (handles arrays like [0, 1] vs [0,1])
+from services.sandbox import run_batch
+from services.signature import MARK, build_source
+
+
+def parse_result(
+    run: Dict[str, Any]
+) -> Optional[Any]:
+    """
+    Extract the JSON after <<RESULT>>;
+    user print() output before it is ignored.
+    """
+
+    if run.get("rc") != 0:
+        return None
+
+    out = run.get("stdout", "")
+
+    i = out.rfind(MARK)
+
+    if i < 0:
+        return None
+
+    lines = (
+        out[i + len(MARK):]
+        .strip()
+        .splitlines()
+    )
+
+    if not lines:
+        return None
+
     try:
-        parsed = json.loads(clean)
-        if isinstance(parsed, list):
-            # Sort if it's unordered indices or normalize
-            return json.dumps(parsed)
-        return json.dumps(parsed, sort_keys=True)
-    except Exception:
-        # Check float equivalence
-        try:
-            val = float(clean)
-            return str(round(val, 4))
-        except Exception:
-            return clean
+        return json.loads(lines[0])
+    except ValueError:
+        return None
 
-# -------------------- PYTHON RUNNER --------------------
 
-def wrap_python_code(user_code: str) -> str:
-    harness = f"""
-import sys
-import json
+def _canon(
+    v: Any,
+    unordered: bool
+) -> Any:
 
-{user_code}
+    if isinstance(v, list):
 
-def main():
-    raw = sys.stdin.read().strip()
-    if not raw:
-        return
-    lines = [l.strip() for l in raw.split('\\n') if l.strip()]
-    sol = Solution()
-    
-    if hasattr(sol, 'twoSum'):
-        nums = json.loads(lines[0])
-        target = int(lines[1])
-        res = sol.twoSum(nums, target)
-        print(json.dumps(res))
-    elif hasattr(sol, 'lengthOfLongestSubstring'):
-        s = json.loads(lines[0]) if lines[0].startswith('"') else lines[0]
-        res = sol.lengthOfLongestSubstring(s)
-        print(res)
-    elif hasattr(sol, 'trap'):
-        height = json.loads(lines[0])
-        res = sol.trap(height)
-        print(res)
-    elif hasattr(sol, 'isAnagram'):
-        s = json.loads(lines[0]) if lines[0].startswith('"') else lines[0]
-        t = json.loads(lines[1]) if lines[1].startswith('"') else lines[1]
-        res = sol.isAnagram(s, t)
-        print("true" if res else "false")
-    elif hasattr(sol, 'coinChange'):
-        coins = json.loads(lines[0])
-        amount = int(lines[1])
-        res = sol.coinChange(coins, amount)
-        print(res)
-    elif hasattr(sol, 'findMedianSortedArrays'):
-        nums1 = json.loads(lines[0])
-        nums2 = json.loads(lines[1])
-        res = sol.findMedianSortedArrays(nums1, nums2)
-        print(round(float(res), 5))
-    else:
-        methods = [m for m in dir(sol) if not m.startswith('_')]
-        if methods:
-            fn = getattr(sol, methods[0])
-            args = []
-            for l in lines:
-                try:
-                    args.append(json.loads(l))
-                except Exception:
-                    args.append(l)
-            res = fn(*args)
-            print(json.dumps(res) if isinstance(res, (list, dict)) else res)
+        items = [
+            _canon(x, unordered)
+            for x in v
+        ]
 
-if __name__ == '__main__':
-    main()
-"""
-    return harness
-
-def run_python_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
-    full_script = wrap_python_code(user_code)
-    with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as f:
-        f.write(full_script)
-        script_path = f.name
-        
-    results = []
-    all_passed = True
-    
-    try:
-        for idx, tc in enumerate(test_cases):
-            tc_input = tc["input"]
-            expected = normalize_output(tc["expected"])
-            hidden = tc.get("hidden", False)
-            
-            start_t = time.time()
-            try:
-                proc = subprocess.run(
-                    [sys.executable, script_path],
-                    input=tc_input,
-                    capture_output=True,
-                    text=True,
-                    timeout=3
-                )
-                dur_ms = max(1, int((time.time() - start_t) * 1000))
-                
-                if proc.returncode != 0:
-                    err = proc.stderr.strip().replace(script_path, "solution.py")
-                    results.append({
-                        "test_index": idx + 1,
-                        "hidden": hidden,
-                        "input": tc_input if not hidden else "[Hidden]",
-                        "expected": tc["expected"] if not hidden else "[Hidden]",
-                        "actual": None,
-                        "passed": False,
-                        "execution_time_ms": dur_ms,
-                        "error": err or "Runtime error"
-                    })
-                    all_passed = False
-                else:
-                    actual_raw = proc.stdout.strip()
-                    actual_norm = normalize_output(actual_raw)
-                    passed = (actual_norm == expected)
-                    if not passed:
-                        all_passed = False
-                    results.append({
-                        "test_index": idx + 1,
-                        "hidden": hidden,
-                        "input": tc_input if not hidden else "[Hidden]",
-                        "expected": tc["expected"] if not hidden else "[Hidden]",
-                        "actual": actual_raw if not hidden else ("[Hidden Result]" if not passed else "[Passed]"),
-                        "passed": passed,
-                        "execution_time_ms": dur_ms,
-                        "error": None
-                    })
-            except subprocess.TimeoutExpired:
-                all_passed = False
-                results.append({
-                    "test_index": idx + 1,
-                    "hidden": hidden,
-                    "input": tc_input if not hidden else "[Hidden]",
-                    "expected": tc["expected"] if not hidden else "[Hidden]",
-                    "actual": None,
-                    "passed": False,
-                    "execution_time_ms": 3000,
-                    "error": "Time Limit Exceeded (> 3.0s)"
-                })
-    finally:
-        try:
-            os.remove(script_path)
-        except Exception:
-            pass
-
-    passed_count = sum(1 for r in results if r["passed"])
-    return {
-        "language": "python",
-        "all_passed": all_passed,
-        "total_cases": len(test_cases),
-        "passed_cases": passed_count,
-        "results": results
-    }
-
-# -------------------- C++ RUNNER --------------------
-
-def run_cpp_solution(user_code: str, test_cases: List[Dict[str, Any]], question_id: str = "") -> Dict[str, Any]:
-    # Check if g++ available
-    try:
-        subprocess.run(["g++.exe", "--version"], capture_output=True, check=True)
-    except Exception:
-        return {
-            "language": "cpp",
-            "all_passed": False,
-            "total_cases": len(test_cases),
-            "passed_cases": 0,
-            "results": [],
-            "compilation_error": "g++ compiler not found in system PATH."
-        }
-        
-    temp_dir = tempfile.mkdtemp()
-    src_file = os.path.join(temp_dir, "solution.cpp")
-    exe_file = os.path.join(temp_dir, "solution.exe")
-
-    # Generate complete C++ harness that handles inputs
-    code_lower = user_code.lower()
-    if "coinchange" in code_lower or "coin" in question_id:
-        dispatch_block = """
-        vector<int> coins = parseVectorInt(line1);
-        int amount = stoi(line2);
-        int res = sol.coinChange(coins, amount);
-        cout << res << endl;
-        return 0;
-        """
-    elif "twosum" in code_lower or "two-sum" in question_id:
-        dispatch_block = """
-        vector<int> nums = parseVectorInt(line1);
-        int target = stoi(line2);
-        vector<int> res = sol.twoSum(nums, target);
-        cout << "[";
-        for (size_t i = 0; i < res.size(); i++) {
-            cout << res[i] << (i + 1 < res.size() ? ", " : "");
-        }
-        cout << "]" << endl;
-        return 0;
-        """
-    elif "lengthoflongestsubstring" in code_lower or "substring" in question_id:
-        dispatch_block = """
-        string s = stripQuotes(line1);
-        int res = sol.lengthOfLongestSubstring(s);
-        cout << res << endl;
-        return 0;
-        """
-    elif "trap" in code_lower or "rain" in question_id:
-        dispatch_block = """
-        vector<int> height = parseVectorInt(line1);
-        int res = sol.trap(height);
-        cout << res << endl;
-        return 0;
-        """
-    elif "isanagram" in code_lower or "anagram" in question_id:
-        dispatch_block = """
-        string s = stripQuotes(line1);
-        string t = stripQuotes(line2);
-        bool res = sol.isAnagram(s, t);
-        cout << (res ? "true" : "false") << endl;
-        return 0;
-        """
-    elif "findmediansortedarrays" in code_lower or "median" in question_id:
-        dispatch_block = """
-        vector<int> nums1 = parseVectorInt(line1);
-        vector<int> nums2 = parseVectorInt(line2);
-        double res = sol.findMedianSortedArrays(nums1, nums2);
-        cout << res << endl;
-        return 0;
-        """
-    else:
-        dispatch_block = """
-        cout << 0 << endl;
-        return 0;
-        """
-
-    harness = f"""
-#include <iostream>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <algorithm>
-#include <unordered_map>
-using namespace std;
-
-{user_code}
-
-vector<int> parseVectorInt(string s) {{
-    vector<int> res;
-    string cur = "";
-    for (char c : s) {{
-        if (isdigit(c) || c == '-') {{
-            cur += c;
-        }} else if (cur.length() > 0) {{
-            res.push_back(stoi(cur));
-            cur = "";
-        }}
-    }}
-    if (cur.length() > 0) res.push_back(stoi(cur));
-    return res;
-}}
-
-string stripQuotes(string s) {{
-    if (s.length() >= 2 && s.front() == '"' && s.back() == '"') {{
-        return s.substr(1, s.length() - 2);
-    }}
-    return s;
-}}
-
-int main() {{
-    string line1, line2;
-    if (!getline(cin, line1)) return 0;
-    getline(cin, line2);
-
-    Solution sol;
-    {dispatch_block}
-}}
-"""
-    with open(src_file, "w", encoding="utf-8") as f:
-        f.write(harness)
-
-    comp = subprocess.run(["g++.exe", "-O2", src_file, "-o", exe_file], capture_output=True, text=True)
-    if comp.returncode != 0:
-        return {
-            "language": "cpp",
-            "all_passed": False,
-            "total_cases": len(test_cases),
-            "passed_cases": 0,
-            "results": [],
-            "compilation_error": comp.stderr
-        }
-
-    results = []
-    all_passed = True
-    for idx, tc in enumerate(test_cases):
-        hidden = tc.get("hidden", False)
-        start_t = time.time()
-        try:
-            proc = subprocess.run([exe_file], input=tc["input"], capture_output=True, text=True, timeout=3)
-            dur_ms = max(1, int((time.time() - start_t) * 1000))
-            if proc.returncode != 0:
-                all_passed = False
-                results.append({
-                    "test_index": idx + 1,
-                    "hidden": hidden,
-                    "input": tc["input"] if not hidden else "[Hidden]",
-                    "expected": tc["expected"] if not hidden else "[Hidden]",
-                    "actual": None,
-                    "passed": False,
-                    "execution_time_ms": dur_ms,
-                    "error": proc.stderr.strip() or "Runtime error"
-                })
-            else:
-                actual_raw = proc.stdout.strip()
-                actual_norm = normalize_output(actual_raw)
-                expected = normalize_output(tc["expected"])
-                passed = (actual_norm == expected)
-                if not passed:
-                    all_passed = False
-                results.append({
-                    "test_index": idx + 1,
-                    "hidden": hidden,
-                    "input": tc["input"] if not hidden else "[Hidden]",
-                    "expected": tc["expected"] if not hidden else "[Hidden]",
-                    "actual": actual_raw if not hidden else ("[Hidden Result]" if not passed else "[Passed]"),
-                    "passed": passed,
-                    "execution_time_ms": dur_ms,
-                    "error": None
-                })
-        except subprocess.TimeoutExpired:
-            all_passed = False
-            results.append({
-                "test_index": idx + 1,
-                "hidden": hidden,
-                "input": tc["input"] if not hidden else "[Hidden]",
-                "expected": tc["expected"] if not hidden else "[Hidden]",
-                "actual": None,
-                "passed": False,
-                "execution_time_ms": 3000,
-                "error": "Time Limit Exceeded (> 3.0s)"
-            })
-
-    passed_count = sum(1 for r in results if r["passed"])
-    return {
-        "language": "cpp",
-        "all_passed": all_passed,
-        "total_cases": len(test_cases),
-        "passed_cases": passed_count,
-        "results": results
-    }
-
-# -------------------- JAVA RUNNER --------------------
-
-def run_java_solution(user_code: str, test_cases: List[Dict[str, Any]], question_id: str = "") -> Dict[str, Any]:
-    try:
-        subprocess.run(["javac", "-version"], capture_output=True, check=True)
-    except Exception:
-        return {
-            "language": "java",
-            "all_passed": False,
-            "total_cases": len(test_cases),
-            "passed_cases": 0,
-            "results": [],
-            "compilation_error": "javac compiler not found in system PATH."
-        }
-
-    temp_dir = tempfile.mkdtemp()
-    src_file = os.path.join(temp_dir, "SolutionRunner.java")
-
-    # If user code has class Solution, strip public to avoid file name mismatch
-    clean_code = re.sub(r'public\s+class\s+Solution', 'class Solution', user_code)
-
-    harness = f"""
-import java.util.*;
-import java.io.*;
-import java.lang.reflect.*;
-
-{clean_code}
-
-public class SolutionRunner {{
-    public static void main(String[] args) throws Exception {{
-        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-        List<String> lines = new ArrayList<>();
-        String line;
-        while ((line = br.readLine()) != null) {{
-            if (!line.trim().isEmpty()) lines.add(line.trim());
-        }}
-        if (lines.isEmpty()) return;
-
-        Solution sol = new Solution();
-        Method target = null;
-        for (Method m : Solution.class.getDeclaredMethods()) {{
-            String name = m.getName();
-            if (!name.equals("rec") && !name.equals("helper") && !name.equals("main") && !name.startsWith("$")) {{
-                target = m;
-                break;
-            }}
-        }}
-        if (target == null && Solution.class.getDeclaredMethods().length > 0) {{
-            target = Solution.class.getDeclaredMethods()[0];
-        }}
-        if (target == null) return;
-        target.setAccessible(true);
-
-        Class<?>[] pTypes = target.getParameterTypes();
-        Object[] mArgs = new Object[pTypes.length];
-        for (int i = 0; i < pTypes.length; i++) {{
-            String s = i < lines.size() ? lines.get(i) : "";
-            Class<?> p = pTypes[i];
-            if (p == int.class || p == Integer.class) {{
-                mArgs[i] = Integer.parseInt(s.replaceAll("[^0-9-]", ""));
-            }} else if (p == String.class) {{
-                mArgs[i] = s.replaceAll("^\\"|\\"$", "");
-            }} else if (p == int[].class) {{
-                String clean = s.replace("[", "").replace("]", "").trim();
-                if (clean.isEmpty()) {{
-                    mArgs[i] = new int[0];
-                }} else {{
-                    String[] parts = clean.split(",");
-                    int[] arr = new int[parts.length];
-                    for (int j = 0; j < parts.length; j++) arr[j] = Integer.parseInt(parts[j].trim());
-                    mArgs[i] = arr;
-                }}
-            }} else if (p == boolean.class || p == Boolean.class) {{
-                mArgs[i] = Boolean.parseBoolean(s);
-            }}
-        }}
-
-        Object res = target.invoke(sol, mArgs);
-        if (res instanceof int[]) {{
-            System.out.println(Arrays.toString((int[]) res));
-        }} else {{
-            System.out.println(res);
-        }}
-    }}
-}}
-"""
-    with open(src_file, "w", encoding="utf-8") as f:
-        f.write(harness)
-
-    comp = subprocess.run(["javac", src_file], capture_output=True, text=True, cwd=temp_dir)
-    if comp.returncode != 0:
-        return {
-            "language": "java",
-            "all_passed": False,
-            "total_cases": len(test_cases),
-            "passed_cases": 0,
-            "results": [],
-            "compilation_error": comp.stderr
-        }
-
-    results = []
-    all_passed = True
-    for idx, tc in enumerate(test_cases):
-        hidden = tc.get("hidden", False)
-        start_t = time.time()
-        try:
-            proc = subprocess.run(
-                ["java", "-cp", temp_dir, "SolutionRunner"],
-                input=tc["input"],
-                capture_output=True,
-                text=True,
-                timeout=4
+        return (
+            sorted(
+                items,
+                key=lambda x:
+                    json.dumps(
+                        x,
+                        sort_keys=True
+                    )
             )
-            dur_ms = max(1, int((time.time() - start_t) * 1000))
-            if proc.returncode != 0:
-                all_passed = False
-                results.append({
-                    "test_index": idx + 1,
-                    "hidden": hidden,
-                    "input": tc["input"] if not hidden else "[Hidden]",
-                    "expected": tc["expected"] if not hidden else "[Hidden]",
-                    "actual": None,
-                    "passed": False,
-                    "execution_time_ms": dur_ms,
-                    "error": proc.stderr.strip() or "Runtime error"
-                })
-            else:
-                actual_raw = proc.stdout.strip()
-                actual_norm = normalize_output(actual_raw)
-                expected = normalize_output(tc["expected"])
-                passed = (actual_norm == expected)
-                if not passed:
-                    all_passed = False
-                results.append({
-                    "test_index": idx + 1,
-                    "hidden": hidden,
-                    "input": tc["input"] if not hidden else "[Hidden]",
-                    "expected": tc["expected"] if not hidden else "[Hidden]",
-                    "actual": actual_raw if not hidden else ("[Hidden Result]" if not passed else "[Passed]"),
-                    "passed": passed,
-                    "execution_time_ms": dur_ms,
-                    "error": None
-                })
-        except subprocess.TimeoutExpired:
-            all_passed = False
-            results.append({
-                "test_index": idx + 1,
-                "hidden": hidden,
-                "input": tc["input"] if not hidden else "[Hidden]",
-                "expected": tc["expected"] if not hidden else "[Hidden]",
-                "actual": None,
-                "passed": False,
-                "execution_time_ms": 4000,
-                "error": "Time Limit Exceeded (> 4.0s)"
-            })
+            if unordered
+            else items
+        )
 
-    passed_count = sum(1 for r in results if r["passed"])
-    return {
-        "language": "java",
-        "all_passed": all_passed,
-        "total_cases": len(test_cases),
-        "passed_cases": passed_count,
-        "results": results
+    return v
+
+
+def _eq(a: Any, b: Any) -> bool:
+
+    if isinstance(a, bool) or isinstance(b, bool):
+        return (
+            isinstance(a, bool)
+            and isinstance(b, bool)
+            and a == b
+        )
+
+    if (
+        isinstance(a, (int, float))
+        and isinstance(b, (int, float))
+    ):
+        return abs(a - b) <= (
+            1e-5
+            * max(
+                1.0,
+                abs(a),
+                abs(b)
+            )
+        )
+
+    if isinstance(a, list) and isinstance(b, list):
+        return (
+            len(a) == len(b)
+            and all(
+                _eq(x, y)
+                for x, y in zip(a, b)
+            )
+        )
+
+    return a == b
+
+
+def values_equal(
+    expected: Any,
+    actual: Any,
+    mode: str = "exact"
+) -> bool:
+
+    un = mode == "unordered"
+
+    return _eq(
+        _canon(expected, un),
+        _canon(actual, un)
+    )
+
+
+def execute_code(
+    language: str,
+    code: str,
+    question: Dict[str, Any],
+    mode: str
+) -> Dict[str, Any]:
+
+    spec = question["spec"]
+    tests = question["tests"]
+
+    if mode != "submit":
+        tests = [
+            t
+            for t in tests
+            if not t["hidden"]
+        ]
+
+    base = {
+        "language": language,
+        "total_cases": len(tests),
     }
 
-# -------------------- MAIN ENTRY --------------------
+    try:
+        source = build_source(
+            language,
+            code,
+            spec
+        )
 
-def execute_code(language: str, code: str, question_id: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
-    lang = (language or "python").lower().strip()
-    if lang == "python":
-        return run_python_solution(code, test_cases)
-    elif lang in ("cpp", "c++"):
-        return run_cpp_solution(code, test_cases, question_id)
-    elif lang == "java":
-        return run_java_solution(code, test_cases, question_id)
-    else:
+    except ValueError as e:
         return {
-            "language": language,
+            **base,
             "all_passed": False,
-            "total_cases": len(test_cases),
             "passed_cases": 0,
             "results": [],
-            "compilation_error": f"Unsupported language: {language}"
+            "compilation_error": str(e),
         }
+
+    batch = run_batch(
+        language,
+        source,
+        [
+            t["input"]
+            for t in tests
+        ],
+    )
+
+    if batch["compile_error"]:
+        return {
+            **base,
+            "all_passed": False,
+            "passed_cases": 0,
+            "results": [],
+            "compilation_error":
+                batch["compile_error"],
+        }
+
+    results: List[Dict[str, Any]] = []
+
+    for i, (t, run) in enumerate(
+        zip(tests, batch["runs"])
+    ):
+
+        hidden = t["hidden"]
+
+        err = None
+        actual = None
+
+        if run["rc"] == 124:
+            err = "Time Limit Exceeded"
+
+        elif run["rc"] == 137:
+            err = (
+                "Memory Limit Exceeded "
+                "(process killed)"
+            )
+
+        elif run["rc"] != 0:
+            err = (
+                run["stderr"].strip()[-600:]
+                or f"Runtime error "
+                   f"(exit code {run['rc']})"
+            )
+
+        else:
+            actual = parse_result(run)
+
+            if actual is None:
+                err = (
+                    "No result produced. "
+                    "Make sure your function "
+                    "returns a value."
+                )
+
+        passed = (
+            err is None
+            and values_equal(
+                json.loads(t["expected"]),
+                actual,
+                spec.get(
+                    "compare",
+                    "exact"
+                ),
+            )
+        )
+
+        shown_actual = (
+            json.dumps(actual)
+            if actual is not None
+            else None
+        )
+
+        results.append(
+            {
+                "test_index": i + 1,
+                "hidden": hidden,
+                "input":
+                    "[Hidden]"
+                    if hidden
+                    else t["input"],
+                "expected":
+                    "[Hidden]"
+                    if hidden
+                    else t["expected"],
+                "actual":
+                    (
+                        "[Passed]"
+                        if passed
+                        else "[Hidden Result]"
+                    )
+                    if hidden
+                    else shown_actual,
+                "passed": passed,
+                "execution_time_ms":
+                    max(1, run["ms"]),
+                "error": err,
+            }
+        )
+
+    n_pass = sum(
+        1
+        for r in results
+        if r["passed"]
+    )
+
+    return {
+        **base,
+        "all_passed":
+            n_pass == len(results)
+            and len(results) > 0,
+        "passed_cases": n_pass,
+        "results": results,
+    }

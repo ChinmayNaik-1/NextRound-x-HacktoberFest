@@ -1,322 +1,349 @@
 import {
-  Question,
-  ExecutionReport,
+  ChatMessage,
   CodeAnalysis,
+  ExecutionReport,
   FinalReport,
+  Health,
   InterviewConfig,
-  RoundType,
   NamedKey,
-  PastInterview
+  PastInterview,
+  Question,
+  RoundTranscripts,
+  RoundType,
 } from '../types';
 
-const API_BASE = "http://127.0.0.1:8000/api";
+const API_BASE: string =
+  (import.meta as any).env?.VITE_API_URL ??
+  'http://127.0.0.1:8000/api';
 
-export async function checkBackendHealth(): Promise<boolean> {
+export class ApiError extends Error {}
+
+async function request<T>(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = 90_000
+): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+
   try {
-    const res = await fetch(`${API_BASE}/health`, { method: "GET" });
-    return res.ok;
-  } catch {
-    return false;
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: ctrl.signal,
+    });
+
+    if (!res.ok) {
+      let msg = res.statusText || `HTTP ${res.status}`;
+
+      try {
+        const body = await res.json();
+        msg =
+          typeof body.detail === 'string'
+            ? body.detail
+            : JSON.stringify(body.detail ?? body);
+      } catch {
+        // Keep default error message.
+      }
+
+      throw new ApiError(msg);
+    }
+
+    return (await res.json()) as T;
+  } catch (e: any) {
+    if (e instanceof ApiError) throw e;
+
+    if (e?.name === 'AbortError') {
+      throw new ApiError('The request timed out. Try again.');
+    }
+
+    throw new ApiError(
+      `Cannot reach the backend at ${API_BASE}. Is it running?`
+    );
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-// ---------------- Named API Keys ----------------
+const post = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify(body),
+});
 
-export async function fetchNamedKeys(): Promise<{ keys: NamedKey[]; active_key_id: string | null }> {
-  try {
-    const res = await fetch(`${API_BASE}/keys`);
-    if (res.ok) return await res.json();
-  } catch (e) {
-    console.error("fetchNamedKeys error", e);
-  }
-  return { keys: [], active_key_id: null };
-}
+export const checkBackendHealth = () =>
+  request<Health>('/health', {}, 5000);
 
-export async function addNamedKey(
+// ---------------- API Keys ----------------
+
+export const fetchNamedKeys = () =>
+  request<{
+    keys: NamedKey[];
+    active_key_id: string | null;
+  }>('/keys', {}, 10_000);
+
+export const addNamedKey = (
   name: string,
   provider: string,
-  api_key: string,
-  verify: boolean = true
-): Promise<{ status: string; key: any; message?: string }> {
-  const res = await fetch(`${API_BASE}/keys`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, provider, api_key, verify })
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Failed to add API key" }));
-    throw new Error(err.detail || "Failed to add key");
-  }
-  return await res.json();
-}
+  api_key: string
+) =>
+  request<{ status: string }>(
+    '/keys',
+    post({
+      name,
+      provider,
+      api_key,
+      verify: true,
+    }),
+    30_000
+  );
 
-export async function verifyApiKey(provider: string, api_key: string): Promise<{ valid: boolean; message: string }> {
-  try {
-    const res = await fetch(`${API_BASE}/keys/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, api_key })
-    });
-    if (res.ok) return await res.json();
-  } catch (e: any) {
-    return { valid: false, message: e.message || "Network error during verification" };
-  }
-  return { valid: false, message: "Verification failed" };
-}
+export const verifyApiKey = (
+  provider: string,
+  api_key: string
+) =>
+  request<{ valid: boolean; message: string }>(
+    '/keys/verify',
+    post({
+      provider,
+      api_key,
+    }),
+    30_000
+  );
 
-export async function activateNamedKey(key_id: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/keys/${key_id}/activate`, { method: "POST" });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function deleteNamedKey(key_id: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/keys/${key_id}`, { method: "DELETE" });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-// ---------------- Interview History ----------------
-
-export async function fetchInterviewHistory(): Promise<PastInterview[]> {
-  try {
-    const res = await fetch(`${API_BASE}/interview/history`);
-    if (res.ok) return await res.json();
-  } catch (e) {
-    console.error("fetchInterviewHistory error", e);
-  }
-  return [];
-}
-
-// ---------------- Questions ----------------
-
-export async function fetchCompanyQuestion(company: string, difficulty: string): Promise<Question> {
-  try {
-    const res = await fetch(`${API_BASE}/questions/company?company=${encodeURIComponent(company)}&difficulty=${encodeURIComponent(difficulty)}`);
-    if (res.ok) return await res.json();
-  } catch (e) {
-    console.error("fetchCompanyQuestion error", e);
-  }
-  return {
-    id: "two-sum",
-    title: "Two Sum",
-    companies: [company || "Google"],
-    difficulty: difficulty || "Medium",
-    topic: "Arrays & Hashing",
-    description: "Given an array of integers `nums` and an integer `target`, return indices of the two numbers such that they add up to target.",
-    starter_code: {
-      python: "class Solution:\n    def twoSum(self, nums: list[int], target: int) -> list[int]:\n        # Write your code here\n        pass\n",
-      cpp: "class Solution {\npublic:\n    vector<int> twoSum(vector<int>& nums, int target) {\n        return {};\n    }\n};\n",
-      java: "class Solution {\n    public int[] twoSum(int[] nums, int target) {\n        return new int[]{};\n    }\n}\n"
+export const activateNamedKey = (id: string) =>
+  request<{ status: string }>(
+    `/keys/${id}/activate`,
+    {
+      method: 'POST',
     },
-    test_cases: [
-      { input: "[2,7,11,15]\n9", expected: "[0, 1]", hidden: false },
-      { input: "[3,2,4]\n6", expected: "[1, 2]", hidden: false },
-      { input: "[3,3]\n6", expected: "[0, 1]", hidden: false },
-      { input: "[-1,-2,-3,-4,-5]\n-8", expected: "[2, 4]", hidden: false },
-      { input: "[0,4,3,0]\n0", expected: "[0, 3]", hidden: false },
-      { input: "[1,5,8,12,14]\n20", expected: "[2, 3]", hidden: true },
-      { input: "[1000000,-1000000,5]\n0", expected: "[0, 1]", hidden: true },
-      { input: "[2,5,5,11]\n10", expected: "[1, 2]", hidden: true },
-      { input: "[1,3,4,2]\n6", expected: "[2, 3]", hidden: true },
-      { input: "[10,20,30,40,50]\n90", expected: "[3, 4]", hidden: true }
-    ]
-  };
-}
+    10_000
+  );
 
-// ---------------- Real Code Execution ----------------
+export const deleteNamedKey = (id: string) =>
+  request<{ status: string }>(
+    `/keys/${id}`,
+    {
+      method: 'DELETE',
+    },
+    10_000
+  );
 
-export async function runCode(language: string, code: string, question_id: string, test_cases: any[]): Promise<ExecutionReport> {
-  const res = await fetch(`${API_BASE}/code/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language, code, question_id, test_cases })
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || "Execution failed");
+// ---------------- History ----------------
+
+export const fetchInterviewHistory = () =>
+  request<PastInterview[]>(
+    '/interview/history',
+    {},
+    10_000
+  );
+
+// ---------------- Questions & Code ----------------
+
+export const fetchCompanyQuestion = (
+  company: string,
+  difficulty: string,
+  exclude: string[],
+  keyId?: string
+) => {
+  const params = new URLSearchParams();
+
+  params.set('company', company);
+  params.set('difficulty', difficulty);
+
+  if (exclude.length > 0) {
+    params.set('exclude', exclude.join(','));
   }
-  return await res.json();
+
+  if (keyId) {
+    params.set('key_id', keyId);
+  }
+
+  return request<Question>(
+    `/questions/company?${params.toString()}`,
+    {},
+    240_000
+  );
+};
+
+export const runCode = (p: {
+  sessionId: string;
+  round: RoundType;
+  questionId: string;
+  language: string;
+  code: string;
+  mode: 'run' | 'submit';
+}) =>
+  request<ExecutionReport>(
+    '/code/run',
+    post({
+      session_id: p.sessionId,
+      round: p.round,
+      question_id: p.questionId,
+      language: p.language,
+      code: p.code,
+      mode: p.mode,
+    }),
+    180_000
+  );
+
+  // ---------------- Proctoring ----------------
+
+export interface ViolationResponse {
+  warnings_count: number;
+  terminated: boolean;
+  max_warnings: number;
 }
 
-export async function analyzeCode(
-  question: Question,
+export const registerInterviewViolation = (p: {
+  sessionId: string;
+  violationType: string;
+}) =>
+  request<ViolationResponse>(
+    '/interview/violation',
+    post({
+      session_id: p.sessionId,
+      violation_type: p.violationType,
+    }),
+    10_000
+);
+
+export const analyzeCode = (
+  questionId: string,
   code: string,
   language: string,
   execution_results: ExecutionReport,
-  provider: string,
-  api_key?: string,
-  key_id?: string
-): Promise<CodeAnalysis> {
-  try {
-    const res = await fetch(`${API_BASE}/code/analyze`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question,
-        code,
-        language,
-        execution_results,
-        provider,
-        api_key: api_key || "",
-        key_id: key_id || ""
-      })
-    });
-    if (res.ok) return await res.json();
-  } catch (e) {
-    console.error("analyzeCode error", e);
-  }
-  return {
-    time_complexity: "O(N) linear time",
-    space_complexity: "O(N) hash space",
-    approach_summary: "Optimal hash-based approach solving in single pass.",
-    strengths: ["Clean syntax", "Handled edge cases"],
-    improvements: ["Memory preallocation"],
-    follow_up_questions: [
-      "Can you explain the trade-offs of this data structure?",
-      "How would you handle stream inputs where the array size is infinite?",
-      "What if memory was strictly limited to O(1)?"
-    ]
-  };
-}
+  keyId?: string
+) =>
+  request<CodeAnalysis>(
+    '/code/analyze',
+    post({
+      question_id: questionId,
+      code,
+      language,
+      execution_results,
+      key_id: keyId,
+    }),
+    120_000
+  );
 
-// ---------------- Resume Parsing ----------------
+// ---------------- Resume ----------------
 
-export async function parseResumePdf(file: File): Promise<{ raw_text: string; detected_skills: string[]; summary: string }> {
-  const formData = new FormData();
-  formData.append("file", file);
-  const res = await fetch(`${API_BASE}/resume/parse-pdf`, {
-    method: "POST",
-    body: formData
-  });
-  if (!res.ok) throw new Error("Failed to parse PDF resume");
-  return await res.json();
-}
+export const parseResumePdf = (file: File) => {
+  const fd = new FormData();
+  fd.append('file', file);
 
-export async function parseResumeText(text: string): Promise<{ raw_text: string; detected_skills: string[]; summary: string }> {
-  const res = await fetch(`${API_BASE}/resume/parse-text`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text })
-  });
-  if (!res.ok) throw new Error("Failed to parse text resume");
-  return await res.json();
-}
-
-// ---------------- Interview Sessions ----------------
-
-export async function startInterviewSession(config: InterviewConfig): Promise<string> {
-  try {
-    const res = await fetch(`${API_BASE}/interview/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config)
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.session_id;
-    }
-  } catch (e) {
-    console.error("startInterviewSession error", e);
-  }
-  return "local-session-" + Date.now();
-}
-
-export async function sendInterviewChat(
-  round_type: RoundType,
-  company: string,
-  role: string,
-  messages: Array<any>,
-  resume_summary: string,
-  additional_context: string,
-  provider: string,
-  api_key?: string,
-  key_id?: string
-): Promise<string> {
-  try {
-    const res = await fetch(`${API_BASE}/interview/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        round_type,
-        company,
-        role,
-        messages,
-        resume_summary,
-        additional_context,
-        provider,
-        api_key: api_key || "",
-        key_id: key_id || ""
-      })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.reply;
-    }
-  } catch (e) {
-    console.error("sendInterviewChat error", e);
-  }
-  return "That makes sense. Can you walk me through the key architectural decisions you made in that project and how you evaluated performance bottlenecks?";
-}
-
-export async function finishInterviewSession(
-  session_id: string,
-  interview_data: any,
-  provider: string,
-  api_key?: string,
-  key_id?: string
-): Promise<FinalReport> {
-  try {
-    const res = await fetch(`${API_BASE}/interview/finish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id,
-        interview_data,
-        provider,
-        api_key: api_key || "",
-        key_id: key_id || ""
-      })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.report;
-    }
-  } catch (e) {
-    console.error("finishInterviewSession error", e);
-  }
-  return {
-    overall_score: 85,
-    hiring_recommendation: "Strong Hire",
-    round_breakdowns: [
-      { round: "DSA Round 1", score: 88, feedback: "Solved problem with optimal O(N) complexity." }
-    ],
-    radar_metrics: {
-      problem_solving: 88,
-      system_architecture: 82,
-      code_quality: 86,
-      communication: 85,
-      cultural_fit: 84
+  return request<{
+    raw_text: string;
+    detected_skills: string[];
+    summary: string;
+  }>(
+    '/resume/parse-pdf',
+    {
+      method: 'POST',
+      body: fd,
     },
-    strengths: [
-      "Optimal algorithmic approach formulated quickly",
-      "Clear explanation during follow-up technical questions"
-    ],
-    weaknesses: [
-      "Could proactively walk through corner edge cases earlier"
-    ],
-    actionable_tips: [
-      "State time and space complexity explicitly upfront"
-    ],
-    recommended_resources: [
-      { title: "NeetCode 150", url: "https://neetcode.io/practice", type: "Algorithms" },
-      { title: "System Design Primer", url: "https://github.com/donnemartin/system-design-primer", type: "Architecture" }
-    ]
-  };
-}
+    30_000
+  );
+};
+
+export const parseResumeText = (text: string) =>
+  request<{
+    raw_text: string;
+    detected_skills: string[];
+    summary: string;
+  }>(
+    '/resume/parse-text',
+    post({ text }),
+    15_000
+  );
+
+// ---------------- Interview Session ----------------
+
+export const startInterviewSession = async (
+  c: InterviewConfig
+): Promise<string> => {
+  const response = await request<{ session_id: string }>(
+    '/interview/start',
+    post({
+      candidate_name: c.candidate_name,
+      company: c.company,
+      role: c.role,
+      difficulty: c.difficulty,
+      selected_rounds: c.selected_rounds,
+      resume_text: c.resume_text,
+      additional_context: c.additional_context,
+    }),
+    15_000
+  );
+
+  return response.session_id;
+};
+
+export const sendInterviewChat = async (p: {
+  roundType: RoundType;
+  company: string;
+  role: string;
+  messages: ChatMessage[];
+  resume: string;
+  additionalContext: string;
+  keyId?: string;
+  extraInstruction?: string;
+}): Promise<string> => {
+  const response = await request<{ reply: string }>(
+    '/interview/chat',
+    post({
+      round_type: p.roundType,
+      company: p.company,
+      role: p.role,
+      messages: p.messages.map(({ role, content }) => ({
+        role,
+        content,
+      })),
+      resume_summary: p.resume,
+      additional_context: p.additionalContext,
+      key_id: p.keyId,
+      extra_instruction: p.extraInstruction ?? '',
+    }),
+    60_000
+  );
+
+  return response.reply;
+};
+
+export const finishInterviewSession = async (p: {
+  sessionId: string;
+  completedRounds: RoundType[];
+  transcripts: RoundTranscripts;
+  warnings: number;
+  keyId?: string;
+}): Promise<FinalReport> => {
+  const round_transcripts: Record<
+    string,
+    { role: string; content: string }[]
+  > = {};
+
+  for (const [k, v] of Object.entries(p.transcripts)) {
+    round_transcripts[k] = (v ?? []).map(
+      ({ role, content }) => ({
+        role,
+        content,
+      })
+    );
+  }
+
+  const response = await request<{ report: FinalReport }>(
+    '/interview/finish',
+    post({
+      session_id: p.sessionId,
+      completed_rounds: p.completedRounds,
+      round_transcripts,
+      warnings_count: p.warnings,
+      key_id: p.keyId,
+    }),
+    180_000
+  );
+
+  return response.report;
+};

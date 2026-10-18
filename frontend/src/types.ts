@@ -1,9 +1,18 @@
 export type RoundType = 'dsa_1' | 'dsa_2' | 'technical' | 'hr';
 
+export const ROUND_ORDER: RoundType[] = [
+  'dsa_1',
+  'dsa_2',
+  'technical',
+  'hr'
+];
+
+export type Provider = 'gemini' | 'openai' | 'groq' | 'anthropic';
+
 export interface NamedKey {
   id: string;
   name: string;
-  provider: 'gemini' | 'openai' | 'groq' | 'anthropic';
+  provider: Provider;
   masked_key: string;
   is_active: boolean;
   created_at: string;
@@ -17,12 +26,18 @@ export interface PastInterview {
   difficulty: string;
   candidate_name: string;
   status: string;
-  scores: any;
+  scores: Partial<FinalReport>;
+}
+
+export interface Health {
+  status: string;
+  sandbox: string;
+  sandbox_ready: boolean;
+  default_key_configured: boolean;
 }
 
 export interface InterviewConfig {
   candidate_name: string;
-  dob: string;
   company: string;
   role: string;
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Brutal';
@@ -30,10 +45,7 @@ export interface InterviewConfig {
   resume_text: string;
   detected_skills: string[];
   additional_context: string;
-  provider: 'gemini' | 'openai' | 'groq' | 'anthropic';
-  api_key: string;
   key_id?: string;
-  remember_key: boolean;
 }
 
 export interface TestCase {
@@ -49,12 +61,14 @@ export interface Question {
   difficulty: string;
   topic: string;
   description: string;
+  source_url: string;
   starter_code: {
     python: string;
     cpp: string;
     java: string;
   };
   test_cases: TestCase[];
+  hidden_count: number;
 }
 
 export interface TestCaseResult {
@@ -93,6 +107,17 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export type RoundTranscripts = Partial<
+  Record<RoundType, ChatMessage[]>
+>;
+
+export interface DSASubmission {
+  questionId: string;
+  code: string;
+  language: string;
+  execReport: ExecutionReport | null;
+}
+
 export interface FinalReport {
   overall_score: number;
   hiring_recommendation: string;
@@ -100,6 +125,7 @@ export interface FinalReport {
     round: string;
     score: number;
     feedback: string;
+    scored?: boolean;
   }>;
   radar_metrics: {
     problem_solving: number;

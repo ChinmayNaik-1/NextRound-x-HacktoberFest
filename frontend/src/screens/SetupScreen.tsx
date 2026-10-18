@@ -2,448 +2,466 @@ import React, { useState } from 'react';
 import {
   Building2,
   FileText,
-  Key,
   ChevronRight,
   Upload,
   Layers,
-  Clock,
-  ArrowLeft
+  ArrowLeft,
+  AlertCircle,
 } from 'lucide-react';
-import { InterviewConfig, RoundType, NamedKey } from '../types';
-import { parseResumePdf, parseResumeText } from '../services/api';
-import { ParticleCanvas } from '../components/ParticleCanvas';
-import { PermissionsCheckModal } from './PermissionsCheckModal';
 
-interface SetupScreenProps {
+import {
+  InterviewConfig,
+  NamedKey,
+  ROUND_ORDER,
+  RoundType,
+} from '../types';
+
+import {
+  parseResumePdf,
+  parseResumeText,
+} from '../services/api';
+
+import { ParticleCanvas } from '../components/ParticleCanvas';
+import { PermissionsCheckModal } from '../components/PermissionsCheckModal';
+
+interface Props {
   initialKey: NamedKey | null;
-  onBackToLanding: () => void;
-  onStart: (config: InterviewConfig) => void;
+  onBack: () => void;
+  onStart: (config: InterviewConfig) => Promise<void>;
 }
 
-const POPULAR_COMPANIES = ["Google", "Amazon", "Meta", "Microsoft", "Apple", "Uber", "Netflix"];
-const POPULAR_ROLES = [
-  "Software Engineer (SDE I/II)",
-  "Senior Software Engineer",
-  "AI / Machine Learning Engineer",
-  "Frontend Engineer",
-  "Fullstack Engineer",
-  "Backend & Distributed Systems"
+const COMPANIES = [
+  'Google',
+  'Amazon',
+  'Meta',
+  'Microsoft',
+  'Apple',
+  'Uber',
+  'Netflix',
+  'Adobe',
+  'Flipkart',
+  'Atlassian',
 ];
 
-export const SetupScreen: React.FC<SetupScreenProps> = ({
+const ROLES = [
+  'Software Engineer (SDE I/II)',
+  'Backend Engineer',
+  'Senior Software Engineer',
+  'AI / Machine Learning Engineer',
+  'Frontend Engineer',
+  'Fullstack Engineer',
+];
+
+const ROUND_INFO: Record<
+  RoundType,
+  { title: string; mins: number; text: string }
+> = {
+  dsa_1: {
+    title: 'DSA round 1',
+    mins: 25,
+    text: 'A fresh LeetCode problem. Ten tests, five hidden.',
+  },
+  dsa_2: {
+    title: 'DSA round 2',
+    mins: 25,
+    text: 'A second, different problem.',
+  },
+  technical: {
+    title: 'Technical round',
+    mins: 40,
+    text: 'Spoken deep-dive into your projects and CS fundamentals.',
+  },
+  hr: {
+    title: 'HR round',
+    mins: 20,
+    text: 'Behavioral questions in STAR format.',
+  },
+};
+
+export const SetupScreen: React.FC<Props> = ({
   initialKey,
-  onBackToLanding,
-  onStart
+  onBack,
+  onStart,
 }) => {
-  const [candidateName, setCandidateName] = useState("Alex");
-  const [dob, setDob] = useState("");
-  const [company, setCompany] = useState("Google");
-  const [role, setRole] = useState("Software Engineer (SDE I/II)");
-  const [difficulty, setDifficulty] = useState<'Easy' | 'Medium' | 'Hard' | 'Brutal'>('Medium');
-  
-  // Rounds Selection
-  const [selectedRounds, setSelectedRounds] = useState<RoundType[]>([
+  const [name, setName] = useState('');
+  const [company, setCompany] = useState('Google');
+  const [role, setRole] = useState(ROLES[0]);
+
+  const [difficulty, setDifficulty] =
+    useState<InterviewConfig['difficulty']>('Medium');
+
+  const [rounds, setRounds] = useState<RoundType[]>([
     'dsa_1',
     'technical',
-    'hr'
+    'hr',
   ]);
-  
-  // Resume
-  const [resumeText, setResumeText] = useState("");
-  const [detectedSkills, setDetectedSkills] = useState<string[]>([]);
-  const [isParsingResume, setIsParsingResume] = useState(false);
-  const [resumeFileName, setResumeFileName] = useState("");
 
-  // Additional instructions
-  const [additionalContext, setAdditionalContext] = useState(
-    "Maintain a realistic technical bar. Ask probing follow-ups on performance bottlenecks and edge cases."
+  const [resume, setResume] = useState('');
+  const [skills, setSkills] = useState<string[]>([]);
+  const [fileName, setFileName] = useState('');
+
+  const [parsing, setParsing] = useState(false);
+
+  const [context, setContext] = useState(
+    'Realistic technical bar. Probe edge cases and performance trade-offs.'
   );
 
-  // Hardware permission modal state
-  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [showPerms, setShowPerms] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setResumeFileName(file.name);
-    setIsParsingResume(true);
-    try {
-      if (file.type === "application/pdf") {
-        const res = await parseResumePdf(file);
-        setResumeText(res.raw_text);
-        setDetectedSkills(res.detected_skills || []);
-      } else {
-        const text = await file.text();
-        const res = await parseResumeText(text);
-        setResumeText(res.raw_text);
-        setDetectedSkills(res.detected_skills || []);
+  const toggle = (round: RoundType) => {
+    setRounds((current) => {
+      if (current.includes(round)) {
+        // Don't allow the user to deselect every round.
+        if (current.length === 1) {
+          return current;
+        }
+
+        return current.filter((item) => item !== round);
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsParsingResume(false);
-    }
-  };
 
-  const toggleRound = (round: RoundType) => {
-    if (selectedRounds.includes(round)) {
-      if (selectedRounds.length === 1) return; // Keep at least one round
-      setSelectedRounds(selectedRounds.filter((r) => r !== round));
-    } else {
-      setSelectedRounds([...selectedRounds, round]);
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setShowPermissionsModal(true);
-  };
-
-  const handlePermissionsConfirmed = () => {
-    setShowPermissionsModal(false);
-    onStart({
-      candidate_name: candidateName,
-      dob,
-      company,
-      role,
-      difficulty,
-      selected_rounds: selectedRounds,
-      resume_text: resumeText,
-      detected_skills: detectedSkills,
-      additional_context: additionalContext,
-      provider: initialKey ? initialKey.provider : 'gemini',
-      api_key: "",
-      key_id: initialKey ? initialKey.id : undefined,
-      remember_key: true
+      return [...current, round];
     });
   };
 
+  const upload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setFileName(file.name);
+    setError('');
+    setParsing(true);
+
+    try {
+      const result =
+        file.type === 'application/pdf' ||
+        file.name.toLowerCase().endsWith('.pdf')
+          ? await parseResumePdf(file)
+          : await parseResumeText(await file.text());
+
+      setResume(result.raw_text);
+      setSkills(result.detected_skills ?? []);
+    } catch (err: any) {
+      setError(`Resume: ${err.message}`);
+      setFileName('');
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const confirmed = async () => {
+    setShowPerms(false);
+    setError('');
+
+    try {
+      await onStart({
+        candidate_name: name.trim() || 'Candidate',
+        company: company.trim(),
+        role: role.trim(),
+        difficulty,
+
+        // Always use the canonical round order instead of
+        // the order in which the user clicked the checkboxes.
+        selected_rounds: ROUND_ORDER.filter((round) =>
+          rounds.includes(round)
+        ),
+
+        resume_text: resume,
+        detected_skills: skills,
+        additional_context: context,
+        key_id: initialKey?.id,
+      });
+    } catch (err: any) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+
+      setError(
+        err.message || 'Could not start the interview.'
+      );
+    }
+  };
+
   return (
-    <div className="relative min-h-screen bg-white text-[#1A1A1A] pb-20 select-text">
-      {/* Antigravity background particles */}
-      <ParticleCanvas count={90} />
+    <div className="relative min-h-screen bg-white text-[#1A1A1A] pb-20">
+      <ParticleCanvas count={60} />
 
       <div className="relative z-10 max-w-4xl mx-auto px-6 pt-8 space-y-6">
-        
-        {/* Navigation Breadcrumb / Back button */}
+
+        {/* Header */}
         <div className="flex items-center justify-between">
           <button
             type="button"
-            onClick={onBackToLanding}
-            className="btn-secondary text-xs px-3.5 py-1.5 flex items-center gap-1.5"
+            onClick={onBack}
+            className="btn-secondary text-xs px-3.5 py-1.5"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to API Keys & History</span>
+            Back
           </button>
 
-          <div className="text-xs text-gray-500 font-mono bg-gray-50 border border-gray-200 px-3 py-1 rounded-pill">
-            Key: <strong className="text-gray-800">{initialKey ? initialKey.name : "Default Gemini"}</strong>
+          <span className="text-xs text-gray-500">
+            Model:{' '}
+            <strong className="text-gray-800">
+              {initialKey
+                ? `${initialKey.name} (${initialKey.provider})`
+                : 'server default'}
+            </strong>
+          </span>
+        </div>
+
+        <h1 className="text-3xl font-medium tracking-tight text-center">
+          Set up your interview
+        </h1>
+
+        {/* Error */}
+        {error && (
+          <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 text-red-700 text-xs p-3">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{error}</span>
           </div>
-        </div>
+        )}
 
-        {/* Header */}
-        <div className="text-center space-y-1">
-          <h1 className="text-3xl font-medium tracking-tight text-[#1A1A1A]">
-            Configure Your Interview Session
-          </h1>
-          <p className="text-xs text-gray-500">
-            Tailor the company question bank, target seniority bar, and rounds to practice.
-          </p>
-        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setShowPerms(true);
+          }}
+          className="rounded-card border border-[#E0E0E0] shadow-card p-6 md:p-8 space-y-6 bg-white"
+        >
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="bg-white rounded-card border border-[#E0E0E0] shadow-card p-6 md:p-8 space-y-6">
-          
-          {/* Section 1: Candidate & Company */}
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+          {/* Company and role */}
+          <section className="space-y-4">
+            <h2 className="text-base font-semibold flex items-center gap-2">
               <Building2 className="w-4 h-4 text-brand-blue" />
-              1. Candidate & Target Company
+              Company and role
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Candidate Name
-                </label>
+            <div className="grid md:grid-cols-2 gap-4">
+
+              {/* Name */}
+              <label className="text-xs font-medium text-gray-700">
+                Your name
+
                 <input
-                  type="text"
-                  value={candidateName}
-                  onChange={(e) => setCandidateName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   required
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-xs"
                 />
-              </div>
+              </label>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center justify-between">
-                  <span>Date of Birth</span>
-                  <span className="text-gray-400 font-normal">Optional</span>
-                </label>
-                <input
-                  type="date"
-                  value={dob}
-                  onChange={(e) => setDob(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-                />
-              </div>
+              {/* Company */}
+              <label className="text-xs font-medium text-gray-700">
+                Target company
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Target Company
-                </label>
                 <input
-                  type="text"
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
-                  list="companies-list"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                  list="companies"
                   required
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-xs"
                 />
-                <datalist id="companies-list">
-                  {POPULAR_COMPANIES.map((c) => (
-                    <option key={c} value={c} />
+
+                <datalist id="companies">
+                  {COMPANIES.map((item) => (
+                    <option key={item} value={item} />
                   ))}
                 </datalist>
-              </div>
+              </label>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  Target Role
-                </label>
+              {/* Role */}
+              <label className="text-xs font-medium text-gray-700 md:col-span-2">
+                Target role
+
                 <input
-                  type="text"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
-                  list="roles-list"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                  list="roles"
                   required
+                  className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-xs"
                 />
-                <datalist id="roles-list">
-                  {POPULAR_ROLES.map((r) => (
-                    <option key={r} value={r} />
+
+                <datalist id="roles">
+                  {ROLES.map((item) => (
+                    <option key={item} value={item} />
                   ))}
                 </datalist>
-              </div>
+              </label>
             </div>
 
-            {/* Difficulty Selector */}
+            {/* Difficulty */}
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                Target Difficulty Bar
-              </label>
-              <div className="grid grid-cols-4 gap-2">
-                {(['Easy', 'Medium', 'Hard', 'Brutal'] as const).map((diff) => (
-                  <button
-                    type="button"
-                    key={diff}
-                    onClick={() => setDifficulty(diff)}
-                    className={`py-1.5 px-3 text-xs font-medium rounded-lg border transition-all text-center ${
-                      difficulty === diff
-                        ? "bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-sm"
-                        : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-                    }`}
-                  >
-                    {diff}
-                  </button>
-                ))}
+              <div className="text-xs font-medium text-gray-700 mb-1.5">
+                Difficulty
               </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                {(['Easy', 'Medium', 'Hard', 'Brutal'] as const).map(
+                  (level) => (
+                    <button
+                      type="button"
+                      key={level}
+                      onClick={() => setDifficulty(level)}
+                      className={`py-1.5 text-xs font-medium rounded-lg border ${
+                        difficulty === level
+                          ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
+                          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {level}
+                    </button>
+                  )
+                )}
+              </div>
+
+              <p className="text-[11px] text-gray-500 mt-1.5">
+                Brutal uses Hard problems. Problems come from
+                LeetCode’s free set, filtered by company when we
+                can match it.
+              </p>
             </div>
-          </div>
+          </section>
 
           <hr className="border-gray-100" />
 
-          {/* Section 2: Round Selection */}
-          <div className="space-y-3">
-            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+          {/* Rounds */}
+          <section className="space-y-3">
+            <h2 className="text-base font-semibold flex items-center gap-2">
               <Layers className="w-4 h-4 text-brand-green" />
-              2. Rounds to Include (Only selected rounds will be scored)
+              Rounds (only finished rounds are scored)
             </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* DSA Round 1 */}
-              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
-                selectedRounds.includes('dsa_1')
-                  ? "bg-[#EBF3FF] border-[#3186FF]"
-                  : "bg-white border-gray-200 hover:border-gray-300"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={selectedRounds.includes('dsa_1')}
-                  onChange={() => toggleRound('dsa_1')}
-                  className="mt-1 w-4 h-4 text-brand-blue rounded"
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-900">DSA Round 1</span>
-                    <span className="text-[10px] bg-brand-blue text-white px-2 py-0.5 rounded-full font-mono">25 mins</span>
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Monaco editor, 10 real test cases (5 open, 5 hidden), and AI approach Q&A.
-                  </p>
-                </div>
-              </label>
+            <div className="grid md:grid-cols-2 gap-3">
+              {ROUND_ORDER.map((round) => (
+                <label
+                  key={round}
+                  className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer ${
+                    rounds.includes(round)
+                      ? 'border-brand-blue bg-[#EBF3FF]'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={rounds.includes(round)}
+                    onChange={() => toggle(round)}
+                    className="mt-1 w-4 h-4"
+                  />
 
-              {/* Extra DSA Round 2 */}
-              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
-                selectedRounds.includes('dsa_2')
-                  ? "bg-[#EBF3FF] border-[#3186FF]"
-                  : "bg-white border-gray-200 hover:border-gray-300"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={selectedRounds.includes('dsa_2')}
-                  onChange={() => toggleRound('dsa_2')}
-                  className="mt-1 w-4 h-4 text-brand-blue rounded"
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-900">DSA Round 2 (Optional)</span>
-                    <span className="text-[10px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-mono">25 mins</span>
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    An extra algorithmic coding round with an additional problem.
-                  </p>
-                </div>
-              </label>
+                  <div>
+                    <div className="text-xs font-semibold">
+                      {ROUND_INFO[round].title}{' '}
+                      <span className="font-mono font-normal text-gray-500">
+                        · {ROUND_INFO[round].mins} min
+                      </span>
+                    </div>
 
-              {/* Technical Round */}
-              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
-                selectedRounds.includes('technical')
-                  ? "bg-[#FFF0F0] border-[#FC413D]"
-                  : "bg-white border-gray-200 hover:border-gray-300"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={selectedRounds.includes('technical')}
-                  onChange={() => toggleRound('technical')}
-                  className="mt-1 w-4 h-4 text-brand-red rounded"
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-900">Technical Round</span>
-                    <span className="text-[10px] bg-brand-red text-white px-2 py-0.5 rounded-full font-mono">40 mins</span>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {ROUND_INFO[round].text}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Voice interview probing your projects, architecture, and CS/AI fundamentals.
-                  </p>
-                </div>
-              </label>
-
-              {/* HR Round */}
-              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
-                selectedRounds.includes('hr')
-                  ? "bg-[#EAFAF1] border-[#00B95C]"
-                  : "bg-white border-gray-200 hover:border-gray-300"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={selectedRounds.includes('hr')}
-                  onChange={() => toggleRound('hr')}
-                  className="mt-1 w-4 h-4 text-brand-green rounded"
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-gray-900">HR Round</span>
-                    <span className="text-[10px] bg-brand-green text-white px-2 py-0.5 rounded-full font-mono">20 mins</span>
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Behavioral questions, culture fit, and leadership principles (STAR format).
-                  </p>
-                </div>
-              </label>
+                </label>
+              ))}
             </div>
-          </div>
+          </section>
 
           <hr className="border-gray-100" />
 
-          {/* Section 3: Resume Parser */}
-          <div className="space-y-3">
-            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+          {/* Resume */}
+          <section className="space-y-3">
+            <h2 className="text-base font-semibold flex items-center gap-2">
               <FileText className="w-4 h-4 text-brand-purple" />
-              3. Candidate Resume (PDF or Plain Text)
+              Resume (PDF or text)
             </h2>
 
             <div className="flex flex-col md:flex-row gap-3">
-              <label className="flex-1 border-2 border-dashed border-gray-300 hover:border-brand-blue rounded-xl p-5 text-center cursor-pointer transition-colors bg-[#FAFAFA] flex flex-col items-center justify-center">
+
+              {/* Upload */}
+              <label className="flex-1 border-2 border-dashed border-gray-300 hover:border-brand-blue rounded-xl p-5 text-center cursor-pointer bg-[#FAFAFA] flex flex-col items-center justify-center">
                 <Upload className="w-6 h-6 text-gray-400 mb-1" />
+
                 <span className="text-xs font-semibold text-gray-700">
-                  {resumeFileName || "Upload Resume (PDF / TXT)"}
+                  {parsing
+                    ? 'Reading…'
+                    : fileName || 'Upload resume'}
                 </span>
-                <span className="text-[10px] text-gray-400 mt-0.5">Click or drag & drop</span>
+
                 <input
                   type="file"
                   accept=".pdf,.txt"
-                  onChange={handleFileUpload}
+                  onChange={upload}
                   className="hidden"
                 />
               </label>
 
-              <div className="flex-1">
-                <textarea
-                  value={resumeText}
-                  onChange={(e) => setResumeText(e.target.value)}
-                  placeholder="Or paste resume text here (projects, skills, experience)..."
-                  rows={3}
-                  className="w-full p-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 text-xs font-mono text-gray-700 leading-relaxed"
-                />
-              </div>
+              {/* Paste resume */}
+              <textarea
+                value={resume}
+                onChange={(e) => setResume(e.target.value)}
+                rows={3}
+                placeholder="Or paste your resume text here…"
+                className="flex-1 p-2.5 rounded-lg border border-gray-300 text-xs font-mono"
+              />
             </div>
 
-            {detectedSkills.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 items-center pt-1">
-                <span className="text-[11px] text-gray-500 font-medium">Parsed Skills:</span>
-                {detectedSkills.map((sk) => (
+            <p className="text-[11px] text-gray-500">
+              Your resume text is sent to the model provider
+              you selected.
+            </p>
+
+            {/* Detected skills */}
+            {skills.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-[11px] text-gray-500">
+                  Detected:
+                </span>
+
+                {skills.map((skill) => (
                   <span
-                    key={sk}
-                    className="text-[10px] bg-blue-50 text-brand-blue border border-blue-200 px-2 py-0.5 rounded-pill font-medium"
+                    key={skill}
+                    className="text-[10px] bg-blue-50 text-brand-blue border border-blue-200 px-2 py-0.5 rounded-pill"
                   >
-                    {sk}
+                    {skill}
                   </span>
                 ))}
               </div>
             )}
-          </div>
+          </section>
 
-          <hr className="border-gray-100" />
+          {/* Additional context */}
+          <label className="block text-xs font-medium text-gray-700">
+            Notes for the interviewer
 
-          {/* Section 4: Additional Context */}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Additional Context for AI Interviewer
-            </label>
             <input
-              type="text"
-              value={additionalContext}
-              onChange={(e) => setAdditionalContext(e.target.value)}
-              placeholder="e.g. Keep it strict on edge cases; be encouraging; focus on system design..."
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+              value={context}
+              onChange={(e) => setContext(e.target.value)}
+              className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-xs"
             />
-          </div>
+          </label>
 
-          {/* Submit CTA */}
-          <div className="pt-2 flex items-center justify-between">
-            <span className="text-xs text-gray-400 flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5" />
-              Hardware & full-screen check will appear next
-            </span>
-
+          {/* Submit */}
+          <div className="flex justify-end">
             <button
               type="submit"
-              className="btn-primary text-xs px-6 py-2.5 flex items-center gap-1.5 shadow-sm"
+              className="btn-primary text-xs px-6 py-2.5"
             >
-              <span>Next: Hardware & Permissions Check</span>
+              Next: camera and microphone check
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </form>
       </div>
 
-      {/* Permissions & Camera Check Modal */}
-      {showPermissionsModal && (
+      {/* Permissions */}
+      {showPerms && (
         <PermissionsCheckModal
-          onProceed={handlePermissionsConfirmed}
-          onCancel={() => setShowPermissionsModal(false)}
+          onProceed={confirmed}
+          onCancel={() => setShowPerms(false)}
         />
       )}
     </div>
