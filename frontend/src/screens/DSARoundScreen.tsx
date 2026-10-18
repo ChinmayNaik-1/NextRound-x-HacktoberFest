@@ -35,6 +35,7 @@ interface DSARoundScreenProps {
   config: InterviewConfig;
   onComplete: (transcript: ChatMessage[], codeSubmission: any) => void;
   onSkip: () => void;
+  onLiveUpdate?: (codeSubmission: any) => void;
 }
 
 interface ResizeHandleProps {
@@ -105,6 +106,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   config,
   onComplete,
   onSkip,
+  onLiveUpdate,
 }) => {
   const { theme } = useTheme();
   const [question, setQuestion] = useState<Question | null>(null);
@@ -119,6 +121,19 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [activeTab, setActiveTab] = useState<number>(0);
   const [isExecuting, setIsExecuting] = useState(false);
   const [execReport, setExecReport] = useState<ExecutionReport | null>(null);
+
+  // Sync latest live progress to parent session state
+  useEffect(() => {
+    if (onLiveUpdate) {
+      onLiveUpdate({
+        questionId: question?.id,
+        code,
+        language,
+        execReport,
+        codeAnalysis,
+      });
+    }
+  }, [code, execReport, codeAnalysis, question?.id, language]);
 
   // AI Voice & Dialog
   const [isGreetingPhase, setIsGreetingPhase] = useState(true);

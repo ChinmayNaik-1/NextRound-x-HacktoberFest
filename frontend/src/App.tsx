@@ -230,6 +230,12 @@ export function App() {
             config={config}
             onComplete={(tr, sub) => handleDSARoundComplete('dsa_1', tr, sub)}
             onSkip={() => advanceToNextRound('dsa_1', false)}
+            onLiveUpdate={(sub) => {
+              setRoundSubmissions((prev) => {
+                const existing = prev.filter((s) => s.round !== 'dsa_1');
+                return [...existing, { round: 'dsa_1', submission: sub }];
+              });
+            }}
           />
         )}
 
@@ -239,6 +245,12 @@ export function App() {
             config={config}
             onComplete={(tr, sub) => handleDSARoundComplete('dsa_2', tr, sub)}
             onSkip={() => advanceToNextRound('dsa_2', false)}
+            onLiveUpdate={(sub) => {
+              setRoundSubmissions((prev) => {
+                const existing = prev.filter((s) => s.round !== 'dsa_2');
+                return [...existing, { round: 'dsa_2', submission: sub }];
+              });
+            }}
           />
         )}
 

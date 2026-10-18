@@ -445,17 +445,18 @@ ROUND SPECIFIC RULES:
 
 
     def generate_final_report(self, interview_data: Dict[str, Any]) -> Dict[str, Any]:
-        # Determine exactly which rounds were actually completed
+        # Determine completed rounds or rounds with activity
         completed_rounds = interview_data.get("completed_rounds") or []
-        if not completed_rounds:
-            # Infer from submissions and transcripts
-            subs = interview_data.get("submissions") or []
-            completed_rounds = list(set([s.get("round") for s in subs if s.get("round")]))
-            if not completed_rounds:
-                # Default to selected rounds that actually had activity
-                completed_rounds = [r for r in interview_data.get("selected_rounds", []) if r in ("dsa_1", "dsa_2")]
+        submissions = interview_data.get("submissions") or []
+        transcripts = interview_data.get("transcripts") or []
 
-        # Ensure we only score completed rounds
+        if not completed_rounds:
+            sub_rounds = [s.get("round") for s in submissions if s.get("round")]
+            if sub_rounds:
+                completed_rounds = list(set(sub_rounds))
+            else:
+                completed_rounds = interview_data.get("selected_rounds", ["dsa_1"])
+
         round_labels = {
             "dsa_1": "DSA Round 1",
             "dsa_2": "DSA Round 2",
@@ -463,66 +464,133 @@ ROUND SPECIFIC RULES:
             "hr": "HR Round"
         }
 
-        # Calculate scores strictly for completed rounds
         breakdowns = []
         scores_list = []
-        
-        submissions = interview_data.get("submissions") or []
-        for cr in completed_rounds:
-            label = round_labels.get(cr, cr)
-            if "dsa" in cr:
-                # Calculate real score from test cases passed!
-                sub = next((s for s in submissions if s.get("round") == cr), None)
-                sub_detail = sub.get("submission") if sub else {}
-                exec_rep = sub_detail.get("execReport") if sub_detail else {}
-                passed = exec_rep.get("passed_cases", 0) if exec_rep else 0
-                total = exec_rep.get("total_cases", 10) if exec_rep else 10
-                
-                score = int((passed / max(1, total)) * 100)
-                feedback = f"Passed {passed} out of {total} test cases (including hidden cases)."
-                breakdowns.append({"round": label, "score": score, "feedback": feedback})
-                scores_list.append(score)
-            elif cr == "technical":
-                score = 82
-                breakdowns.append({"round": label, "score": score, "feedback": "Demonstrated technical depth in project architecture."})
-                scores_list.append(score)
-            elif cr == "hr":
-                score = 85
-                breakdowns.append({"round": label, "score": score, "feedback": "Clear articulation of past experiences using STAR method."})
-                scores_list.append(score)
+        problem_solving_score = 0
+        code_quality_score = 0
+        tech_score = 0
+        hr_score = 0
 
-        if not breakdowns:
-            # Fallback if no specific round registered
-            breakdowns.append({"round": "DSA Round 1", "score": 80, "feedback": "Completed problem solving round."})
-            scores_list.append(80)
+        # Extract user exchanges from transcripts
+        user_messages = [
+            m.get("content", "").strip() 
+            for m in transcripts 
+            if m.get("role") in ("user", "candidate") and m.get("content")
+        ]
+        total_user_words = sum(len(msg.split()) for msg in user_messages)
+
+        # 1. Evaluate DSA Rounds based on actual test cases and code
+        dsa_rounds_found = [cr for cr in completed_rounds if "dsa" in cr]
+        for cr in dsa_rounds_found:
+            label = round_labels.get(cr, cr)
+            sub = next((s for s in submissions if s.get("round") == cr), None)
+            sub_detail = sub.get("submission") if sub else {}
+            exec_rep = sub_detail.get("execReport") if sub_detail else {}
+            candidate_code = sub_detail.get("code", "") if sub_detail else ""
+
+            passed = exec_rep.get("passed_cases", 0) if exec_rep else 0
+            total = exec_rep.get("total_cases", 10) if exec_rep else 10
+
+            # If user ran visible tests or submit
+            if total > 0 and (passed > 0 or exec_rep.get("results")):
+                dsa_score = int((passed / max(1, total)) * 100)
+                feedback = f"Passed {passed} of {total} test cases. "
+                if passed == total:
+                    feedback += "Optimal solution passing all test conditions."
+                elif passed >= 5:
+                    feedback += "Working logic passing majority of edge cases."
+                else:
+                    feedback += "Initial approach formulated; boundary cases require handling."
+            elif candidate_code and len(candidate_code.strip()) > 30 and "pass" not in candidate_code:
+                # Code was written but perhaps tests weren't fully run before proceeding
+                dsa_score = 65
+                feedback = "Formulated functional code structure. Ensure all test cases are executed before final submission."
+            else:
+                dsa_score = 0
+                feedback = "No passing test cases or empty code stub submitted."
+
+            breakdowns.append({"round": label, "score": dsa_score, "feedback": feedback})
+            scores_list.append(dsa_score)
+            problem_solving_score = max(problem_solving_score, dsa_score)
+            code_quality_score = max(code_quality_score, dsa_score)
+
+        # 2. Evaluate Technical Round based on user replies
+        if "technical" in completed_rounds:
+            tech_user_replies = [
+                m.get("content", "") 
+                for m in transcripts 
+                if m.get("role") in ("user", "candidate") and len(m.get("content", "").split()) >= 4
+            ]
+            if len(tech_user_replies) >= 3 and total_user_words > 80:
+                tech_score = 88
+                feedback = "Demonstrated strong technical depth, system architecture trade-offs, and clear technical communication."
+            elif len(tech_user_replies) >= 1 and total_user_words > 25:
+                tech_score = 75
+                feedback = "Solid grasp of core architectural concepts with good articulation of project decisions."
+            elif len(tech_user_replies) >= 1:
+                tech_score = 60
+                feedback = "Brief responses provided; provide deeper architectural rationale in future discussions."
+            else:
+                tech_score = 50
+                feedback = "Limited technical discussion during the session."
+
+            breakdowns.append({"round": round_labels["technical"], "score": tech_score, "feedback": feedback})
+            scores_list.append(tech_score)
+
+        # 3. Evaluate HR Round based on behavioral responses
+        if "hr" in completed_rounds:
+            hr_user_replies = [
+                m.get("content", "") 
+                for m in transcripts 
+                if m.get("role") in ("user", "candidate") and len(m.get("content", "").split()) >= 4
+            ]
+            if len(hr_user_replies) >= 2 and total_user_words > 60:
+                hr_score = 86
+                feedback = "Clear articulation of past experiences, leadership principles, and team collaboration."
+            elif len(hr_user_replies) >= 1:
+                hr_score = 74
+                feedback = "Positive cultural alignment and communication."
+            else:
+                hr_score = 55
+                feedback = "Completed behavioral round with introductory responses."
+
+            breakdowns.append({"round": round_labels["hr"], "score": hr_score, "feedback": feedback})
+            scores_list.append(hr_score)
+
+        if not scores_list:
+            breakdowns.append({"round": "DSA Round 1", "score": 0, "feedback": "Round started but no solutions or test cases were run."})
+            scores_list.append(0)
 
         overall = int(sum(scores_list) / len(scores_list))
         rec = "Strong Hire" if overall >= 85 else "Hire" if overall >= 70 else "Leaning Hire" if overall >= 55 else "No Hire"
+
+        # Dynamically scale communication and competency metrics based on actual responses
+        comm_metric = min(95, max(40, 50 + min(40, total_user_words // 5)))
 
         return {
             "overall_score": overall,
             "hiring_recommendation": rec,
             "round_breakdowns": breakdowns,
             "radar_metrics": {
-                "problem_solving": overall,
-                "system_architecture": 75 if "technical" in completed_rounds else overall,
-                "code_quality": breakdowns[0]["score"] if breakdowns else 80,
-                "communication": 82,
-                "cultural_fit": 84 if "hr" in completed_rounds else 78
+                "problem_solving": problem_solving_score if dsa_rounds_found else overall,
+                "system_architecture": tech_score if "technical" in completed_rounds else max(60, overall),
+                "code_quality": code_quality_score if dsa_rounds_found else max(65, overall),
+                "communication": comm_metric,
+                "cultural_fit": hr_score if "hr" in completed_rounds else 78
             },
             "strengths": [
-                f"Formulated working algorithmic approach for {interview_data.get('company', 'target company')}",
-                "Clear verbal communication during problem solving",
-                "Demonstrated focus under timed conditions"
+                f"Completed assessment for target company {interview_data.get('company', 'Company')}",
+                "Structured algorithmic reasoning and problem decomposition",
+                "Demonstrated composure under timed interview conditions"
             ],
             "weaknesses": [
-                "Could methodically verify edge cases before initial test execution",
-                "Be more proactive in stating asymptotic space bounds upfront"
+                "Ensure all visible and hidden test cases are executed prior to concluding",
+                "Elaborate on edge case constraints and space complexity trade-offs"
             ],
             "actionable_tips": [
-                "Always walk through at least one extreme input (e.g. empty, single element, negative numbers)",
+                "Run test cases against boundaries (e.g. empty inputs, duplicates, maximum constraints)",
                 "State time and space complexity explicitly before writing code",
-                "Practice Blind 75 and NeetCode 150 top patterns"
+                "Practice NeetCode 150 sliding window, DP, and two-pointer patterns"
             ],
             "recommended_resources": [
                 {"title": "NeetCode 150 Practice", "url": "https://neetcode.io/practice", "type": "Algorithms"},
