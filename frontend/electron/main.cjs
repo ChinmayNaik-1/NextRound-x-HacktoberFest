@@ -125,6 +125,18 @@ function createWindow() {
     }
   });
 
+  mainWindow.on('enter-full-screen', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('fullscreen-change', true);
+    }
+  });
+
+  mainWindow.on('leave-full-screen', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('fullscreen-change', false);
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -133,6 +145,12 @@ function createWindow() {
 ipcMain.on('toggle-fullscreen', () => {
   if (mainWindow) {
     mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  }
+});
+
+ipcMain.on('enter-fullscreen', () => {
+  if (mainWindow && !mainWindow.isFullScreen()) {
+    mainWindow.setFullScreen(true);
   }
 });
 

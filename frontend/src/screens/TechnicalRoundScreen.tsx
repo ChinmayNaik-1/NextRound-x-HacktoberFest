@@ -50,13 +50,18 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
 
   const speechRecognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasStartedRef = useRef<boolean>(false);
+  const isSendingRef = useRef<boolean>(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Initial Technical Opening
+  // Initial Technical Opening (guarded against double execution)
   useEffect(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
     async function startRound() {
       const isAI = config.role.toLowerCase().includes("ai") || config.role.toLowerCase().includes("machine learning");
       const initialTopic = isAI
@@ -192,7 +197,9 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
   };
 
   const handleUserResponse = async (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || isSendingRef.current) return;
+    isSendingRef.current = true;
+
     if (isListeningMic) {
       await stopMicRecognition();
     }
@@ -201,20 +208,26 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
     setAiStatus('thinking');
     setAiCaption("Evaluating technical depth and formulating response...");
 
-    const reply = await sendInterviewChat(
-      'technical',
-      config.company,
-      config.role,
-      [...chatMessages, { id: 'usr', role: 'user', content: text, timestamp: '' }],
-      config.resume_text,
-      config.additional_context,
-      config.provider,
-      config.api_key,
-      config.key_id
-    );
+    try {
+      const reply = await sendInterviewChat(
+        'technical',
+        config.company,
+        config.role,
+        [...chatMessages, { id: 'usr', role: 'user', content: text, timestamp: '' }],
+        config.resume_text,
+        config.additional_context,
+        config.provider,
+        config.api_key,
+        config.key_id
+      );
 
-    addMessage("assistant", reply);
-    speakText(reply);
+      addMessage("assistant", reply);
+      speakText(reply);
+    } catch (err) {
+      console.error("handleUserResponse error:", err);
+    } finally {
+      isSendingRef.current = false;
+    }
   };
 
 
@@ -231,7 +244,7 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-white text-[#1A1A1A] overflow-hidden">
+    <div className="flex flex-col flex-1 bg-white text-[#1A1A1A] overflow-hidden">
       {/* Top Bar */}
       <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shrink-0 shadow-sm">
         <div className="flex items-center gap-3">

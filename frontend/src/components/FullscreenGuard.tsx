@@ -15,11 +15,19 @@ export const FullscreenGuard: React.FC<FullscreenGuardProps> = ({
   onTerminate,
 }) => {
   const [showWarningModal, setShowWarningModal] = useState<number | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(() => {
+    return !!document.fullscreenElement;
+  });
 
   // Request fullscreen utility
   const enterFullscreen = async () => {
     try {
+      if ((window as any).electronAPI?.enterFullscreen) {
+        (window as any).electronAPI.enterFullscreen();
+        setIsFullscreen(true);
+        setShowWarningModal(null);
+        return;
+      }
       if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen();
       }
@@ -31,7 +39,25 @@ export const FullscreenGuard: React.FC<FullscreenGuardProps> = ({
   };
 
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive) {
+      setShowWarningModal(null);
+      return;
+    }
+
+    // Reset warning modal when warnings count resets to 0 (new interview)
+    if (warningsCount === 0) {
+      setShowWarningModal(null);
+    }
+
+    const electron = (window as any).electronAPI;
+    if (electron?.onFullscreenChange) {
+      electron.onFullscreenChange((isFs: boolean) => {
+        setIsFullscreen(isFs);
+        if (!isFs && isActive) {
+          handleFocusLoss();
+        }
+      });
+    }
 
     const handleFocusLoss = () => {
       const nextCount = warningsCount + 1;

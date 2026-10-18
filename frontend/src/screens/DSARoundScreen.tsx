@@ -142,6 +142,8 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [showSkipModal, setShowSkipModal] = useState(false);
 
   const speechRecognitionRef = useRef<any>(null);
+  const hasStartedRef = useRef<boolean>(false);
+  const isSendingRef = useRef<boolean>(false);
 
   useEffect(() => {
     const caption = aiCaptionRef.current;
@@ -170,8 +172,11 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
     return normalized.length > 72 ? `${normalized.slice(0, 69).trimEnd()}...` : normalized;
   };
 
-  // 1. Fetch Company Question
+  // 1. Fetch Company Question (guarded against duplicate execution)
   useEffect(() => {
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
+
     async function init() {
       const q = await fetchCompanyQuestion(config.company, config.difficulty);
       setQuestion(q);
@@ -323,7 +328,9 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   };
 
   const handleUserSpokenMessage = async (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || isSendingRef.current) return;
+    isSendingRef.current = true;
+
     if (isListeningMic) {
       await stopMicRecognition();
     }
@@ -336,26 +343,32 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
       ? (execReport.all_passed ? "all_tests_passed" : "tests_run")
       : (code.trim().length > 30 ? "drafting_code" : "not_started");
 
-    // Send to agent for interview turn with complete context!
-    const reply = await sendInterviewChat(
-      'dsa_1',
-      config.company,
-      config.role,
-      [...chatMessages, { id: 'usr', role: 'user', content: text, timestamp: '' }],
-      config.resume_text,
-      config.additional_context,
-      config.provider,
-      config.api_key,
-      config.key_id,
-      question,
-      code,
-      language,
-      execReport,
-      submissionStatus
-    );
+    try {
+      // Send to agent for interview turn with complete context!
+      const reply = await sendInterviewChat(
+        'dsa_1',
+        config.company,
+        config.role,
+        [...chatMessages, { id: 'usr', role: 'user', content: text, timestamp: '' }],
+        config.resume_text,
+        config.additional_context,
+        config.provider,
+        config.api_key,
+        config.key_id,
+        question,
+        code,
+        language,
+        execReport,
+        submissionStatus
+      );
 
-    addMessage("assistant", reply);
-    speakText(reply);
+      addMessage("assistant", reply);
+      speakText(reply);
+    } catch (err) {
+      console.error("handleUserSpokenMessage error:", err);
+    } finally {
+      isSendingRef.current = false;
+    }
   };
 
   const addMessage = (role: 'assistant' | 'user', content: string) => {
@@ -466,7 +479,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#F8F9FA] text-[#1A1A1A] overflow-hidden select-text">
+    <div className="flex flex-col flex-1 bg-[#F8F9FA] text-[#1A1A1A] overflow-hidden select-text">
       {/* Top Banner */}
       <div className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
