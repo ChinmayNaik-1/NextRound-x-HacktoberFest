@@ -110,8 +110,13 @@ def run_python_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dic
             
             start_t = time.time()
             try:
+                python_command = (
+                    [sys.executable, "--run-python", script_path]
+                    if getattr(sys, "frozen", False)
+                    else [sys.executable, script_path]
+                )
                 proc = subprocess.run(
-                    [sys.executable, script_path],
+                    python_command,
                     input=tc_input,
                     capture_output=True,
                     text=True,

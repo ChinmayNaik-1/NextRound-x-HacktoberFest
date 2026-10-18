@@ -2,7 +2,11 @@
 # Dependencies & Package Managers
 # ==========================================
 node_modules/
+.build-tools/
 backend/venv/
+backend/.build-venv/
+backend/build/
+backend/dist/
 venv/
 .venv/
 env/
@@ -116,4 +120,3 @@ Hacktoberfest Hack Day – Themes & Judging Criteria.pdf
 # Temporary Test Screenshots
 # ==========================================
 frontend/screenshot_*.png
-

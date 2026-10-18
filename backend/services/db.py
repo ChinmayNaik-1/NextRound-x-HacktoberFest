@@ -5,9 +5,13 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "interviewai.db")
+DATA_DIR = os.environ.get("NEXTROUND_DATA_DIR")
+DB_PATH = os.path.join(DATA_DIR, "interviewai.db") if DATA_DIR else os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "interviewai.db"
+)
 
 def get_connection():
+    os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn

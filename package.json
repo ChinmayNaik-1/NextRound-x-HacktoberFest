@@ -6,6 +6,9 @@
   "scripts": {
     "electron:dev": "npm --prefix frontend run electron:dev",
     "dev": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend run build"
+    "build": "npm run build:frontend",
+    "build:frontend": "npm --prefix frontend run build",
+    "package:backend": "npm --prefix frontend run package:backend",
+    "dist:win": "npm run package:backend && npm --prefix frontend run dist:win"
   }
 }

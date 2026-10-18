@@ -1,16 +1,21 @@
 {
-  "name": "interviewai-desktop",
-  "private": true,
+  "name": "nextround-desktop",
   "version": "1.0.0",
+  "description": "NextRound AI-powered interview practice desktop application",
+  "author": "NextRound contributors",
+  "license": "MIT",
+  "private": true,
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc -b && vite build",
     "electron:dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173\" \"wait-on -l http-get://127.0.0.1:5173 && electron .\"",
-    "start": "electron ."
+    "start": "electron .",
+    "package:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-backend.ps1",
+    "dist:win": "npm run build && electron-builder --win nsis --x64"
   },
-  "dependencies": {
+  "devDependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.3.3",
     "autoprefixer": "^10.6.1",
@@ -20,9 +25,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
-    "tailwindcss": "^4.3.3"
-  },
-  "devDependencies": {
+    "tailwindcss": "^4.3.3",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
@@ -31,9 +34,54 @@
     "concurrently": "^10.0.6",
     "cross-env": "^10.1.0",
     "electron": "^44.9.0",
+    "electron-builder": "^26.0.12",
     "playwright": "^1.64.1",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "wait-on": "^9.5.1"
+  },
+  "build": {
+    "appId": "com.nextround.desktop",
+    "productName": "NextRound",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json",
+      "!node_modules/**/*",
+      "!src/**/*",
+      "!package-lock.json",
+      "!*.ts",
+      "!*.tsx",
+      "!*.lock",
+      "!vite.config.ts",
+      "!tsconfig*.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/NextRoundBackend",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "NextRound-Setup.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

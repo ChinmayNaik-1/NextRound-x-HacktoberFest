@@ -21,7 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Brand Logo & Name */}
       <div className="flex items-center gap-3">
         <img
-          src={theme === 'dark' ? '/dark.png' : '/light.png'}
+          src={`${import.meta.env.BASE_URL}${theme === 'dark' ? 'dark.png' : 'light.png'}`}
           alt=""
           aria-hidden="true"
           className="h-7 w-7 object-contain drop-shadow-sm"

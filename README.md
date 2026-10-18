@@ -741,6 +741,8 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+The Electron development app starts this backend automatically. No separate terminal is needed when using `npm run electron:dev`.
+
 ---
 
 ## 3. Frontend setup
@@ -775,29 +777,96 @@ The provider can then be changed without modifying the interview logic.
 
 # ▶️ Running the Application
 
-Start the development environment using the project's configured command:
+From the repository root, start the desktop development environment:
 
 ```bash
+npm install --prefix frontend
+npm run electron:dev
+```
+
+Electron starts the FastAPI backend and Vite development server. To run only the browser frontend instead:
+
+```text
 npm run dev
 ```
 
-The frontend is available at:
+In that browser-only workflow, start the backend separately from `backend/` using:
 
 ```text
-http://127.0.0.1:5173/
+python -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-The FastAPI backend runs at:
+The API health endpoint is:
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:8000/api/health
 ```
 
-API health can be checked through:
+---
+
+# 🪟 Windows Desktop Installer
+
+The Windows x64 installer bundles the Vite frontend and a PyInstaller-packaged FastAPI backend. Users do not need Node.js or Python installed. The backend database, saved API keys, and settings are written under `%APPDATA%\NextRound` and are kept when upgrading or uninstalling.
+
+## Build prerequisites
+
+- Windows x64 build machine
+- Node.js and npm
+- Official 64-bit Windows CPython 3.11-3.14 and pip (build time only; MSYS/MinGW Python is not supported)
+- Internet access to restore npm and Python dependencies
+
+The installer does not bundle C++ or Java compilers. Running C++ or Java submissions requires `g++` or `javac`/`java` to be installed and available on `PATH`; Python submissions use the bundled backend runtime.
+
+## Build the installer
+
+From the repository root:
+
+```powershell
+npm install --prefix frontend
+npm run build:frontend
+npm run package:backend
+npm run dist:win
+```
+
+`npm run dist:win` packages the backend, builds the frontend, and creates:
 
 ```text
-/api/health
+frontend/release/NextRound-Setup.exe
 ```
+
+The backend packaging script creates an isolated `backend/.build-venv`; it does not use the application's development virtual environment. `npm run electron:dev` remains the development workflow and Electron starts/stops the local backend itself.
+
+## Publish a GitHub Release
+
+1. Build and smoke-test `frontend/release/NextRound-Setup.exe` on Windows.
+2. Create and push a version tag, for example `v1.0.0`.
+3. Create a GitHub Release for that tag.
+4. Attach `frontend/release/NextRound-Setup.exe` to the release, add release notes, and publish.
+
+The installer is not code-signed by this build configuration. Windows may show SmartScreen or publisher warnings until a trusted code-signing certificate is configured.
+
+Clean-machine validation requires installing and exercising the generated installer on a Windows machine or VM without Node.js or Python installed. A successful build alone does not certify that test.
+
+To select a specific Python installation for packaging, set `PYTHON_EXECUTABLE` before running the build:
+
+```powershell
+$env:PYTHON_EXECUTABLE = "C:\Path\To\Python\python.exe"
+npm run package:backend
+```
+
+## Create a GitHub Release
+
+After testing the installer and pushing the release tag, create the release and upload the installer with GitHub CLI:
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+gh release create v1.0.0 frontend/release/NextRound-Setup.exe `
+  --title "NextRound v1.0.0" `
+  --notes "Windows x64 installer for NextRound."
+```
+
+Alternatively, create a release for the pushed tag in the GitHub Releases page and attach `frontend/release/NextRound-Setup.exe` in the release asset drop zone before publishing.
 
 ---
 
