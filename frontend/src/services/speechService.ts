@@ -91,9 +91,24 @@ export class SpeechService {
     });
   }
 
+  private static activeUtterances: SpeechSynthesisUtterance[] = [];
+  private static keepAliveTimer: any = null;
+
+  private static cleanTextForSpeech(text: string): string {
+    return text
+      .replace(/```[\s\S]*?```/g, ' [code block omitted] ') // Remove multi-line code blocks
+      .replace(/`([^`]+)`/g, '$1') // Inline code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Markdown links
+      .replace(/[*_~#>-]/g, ' ') // Markdown symbols
+      .replace(/\[Backend Notice:[^\]]*\]/gi, '') // Filter system notice tags
+      .replace(/\[Offline Notice\]:[^.]*\./gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   // 1. Text-to-Speech (TTS)
   public static speak(
-    text: string,
+    rawText: string,
     onStart?: () => void,
     onEnd?: () => void,
     onError?: (err: any) => void
@@ -105,8 +120,14 @@ export class SpeechService {
 
     // Cancel any previous utterance immediately
     window.speechSynthesis.cancel();
+    SpeechService.activeUtterances = [];
+    if (SpeechService.keepAliveTimer) {
+      clearInterval(SpeechService.keepAliveTimer);
+      SpeechService.keepAliveTimer = null;
+    }
 
-    if (!text || !text.trim()) {
+    const text = SpeechService.cleanTextForSpeech(rawText);
+    if (!text) {
       if (onEnd) onEnd();
       return;
     }
@@ -115,10 +136,6 @@ export class SpeechService {
     if (window.speechSynthesis.paused) {
       window.speechSynthesis.resume();
     }
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
 
     // Pick best voice on the fly if not yet cached
     if (!SpeechService.selectedVoice) {
@@ -134,36 +151,102 @@ export class SpeechService {
       ) || voices.find((v) => v.lang.startsWith('en')) || null;
     }
 
-    if (SpeechService.selectedVoice) {
-      utterance.voice = SpeechService.selectedVoice;
+    // Chunk text by sentences to prevent Chromium's 200-250 char cutoff / hang
+    const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+    const chunks: string[] = [];
+    let currentChunk = '';
+
+    for (const sentence of sentences) {
+      if ((currentChunk + sentence).length > 200) {
+        if (currentChunk.trim()) chunks.push(currentChunk.trim());
+        currentChunk = sentence;
+      } else {
+        currentChunk += ' ' + sentence;
+      }
+    }
+    if (currentChunk.trim()) chunks.push(currentChunk.trim());
+
+    if (chunks.length === 0) {
+      if (onEnd) onEnd();
+      return;
     }
 
-    utterance.onstart = () => {
-      if (onStart) onStart();
-    };
+    let started = false;
+    let completedChunks = 0;
 
-    utterance.onend = () => {
-      if (onEnd) onEnd();
-    };
-
-    utterance.onerror = (e) => {
-      if (e.error !== 'canceled' && onError) {
-        onError(e);
+    // Chromium keepalive: interval that briefly pauses and resumes to keep audio channel open
+    SpeechService.keepAliveTimer = setInterval(() => {
+      if (window.speechSynthesis && window.speechSynthesis.speaking) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
       }
-      if (onEnd) onEnd();
-    };
+    }, 10000);
 
-    // Chromium Bugfix: Small 60ms delay allows Chromium's audio stream pipeline to unfreeze after cancel()
+    chunks.forEach((chunkText, idx) => {
+      const utterance = new SpeechSynthesisUtterance(chunkText);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      if (SpeechService.selectedVoice) {
+        utterance.voice = SpeechService.selectedVoice;
+      }
+
+      utterance.onstart = () => {
+        if (!started) {
+          started = true;
+          if (onStart) onStart();
+        }
+      };
+
+      utterance.onend = () => {
+        completedChunks++;
+        if (completedChunks >= chunks.length) {
+          if (SpeechService.keepAliveTimer) {
+            clearInterval(SpeechService.keepAliveTimer);
+            SpeechService.keepAliveTimer = null;
+          }
+          SpeechService.activeUtterances = [];
+          if (onEnd) onEnd();
+        }
+      };
+
+      utterance.onerror = (e) => {
+        console.warn("SpeechSynthesis utterance error:", e);
+        if (e.error !== 'canceled' && onError && completedChunks === 0) {
+          onError(e);
+        }
+        completedChunks++;
+        if (completedChunks >= chunks.length) {
+          if (SpeechService.keepAliveTimer) {
+            clearInterval(SpeechService.keepAliveTimer);
+            SpeechService.keepAliveTimer = null;
+          }
+          SpeechService.activeUtterances = [];
+          if (onEnd) onEnd();
+        }
+      };
+
+      // Store in static array to prevent garbage collection dropping speech mid-stream
+      SpeechService.activeUtterances.push(utterance);
+    });
+
+    // Chromium Bugfix: 60ms delay allows audio pipeline to clear after cancel()
     setTimeout(() => {
       if (window.speechSynthesis.paused) {
         window.speechSynthesis.resume();
       }
-      window.speechSynthesis.speak(utterance);
-    }, 60);
+      SpeechService.activeUtterances.forEach((utt) => {
+        window.speechSynthesis.speak(utt);
+      });
+    }, 80);
   }
 
   // Interrupt AI immediately
   public static stopSpeaking(): void {
+    if (SpeechService.keepAliveTimer) {
+      clearInterval(SpeechService.keepAliveTimer);
+      SpeechService.keepAliveTimer = null;
+    }
+    SpeechService.activeUtterances = [];
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
