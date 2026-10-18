@@ -255,11 +255,22 @@ export class SpeechService {
         };
 
         rec.onerror = (event: any) => {
-          console.warn("Speech recognition notice:", event.error);
-          if (event.error !== 'no-speech' && onError) {
+          // In Electron/Chromium, Web Speech API frequently emits 'network' or 'not-allowed'
+          // because Google speech API keys are not compiled into open-source Electron.
+          // We intentionally do not abort the recording, because MediaRecorder captures the actual audio
+          // which is then transcribed reliably by the backend.
+          console.warn("Browser SpeechRecognition notice (falling back to audio recording):", event.error);
+          if (
+            event.error !== 'no-speech' &&
+            event.error !== 'network' &&
+            event.error !== 'not-allowed' &&
+            event.error !== 'service-not-allowed' &&
+            onError
+          ) {
             onError(event);
           }
         };
+
 
         rec.onend = () => {
           // If mediaRecorder is still running, speech recognition may have cycled

@@ -24,9 +24,11 @@ import {
   deleteSavedResume,
   getCachedResumes,
   getCachedCredentials,
+  getCachedKeys,
   fetchCredentials,
   saveCredentialsApi
 } from '../services/api';
+
 import { ParticleCanvas } from '../components/ParticleCanvas';
 import { PermissionsCheckModal } from './PermissionsCheckModal';
 
@@ -246,6 +248,8 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
 
   const handlePermissionsConfirmed = () => {
     setShowPermissionsModal(false);
+    const cachedKeys = getCachedKeys();
+    const effectiveKey = initialKey || cachedKeys.keys.find(k => k.id === cachedKeys.active_key_id) || cachedKeys.keys.find(k => k.is_active) || cachedKeys.keys[0] || null;
     onStart({
       candidate_name: candidateName,
       dob,
@@ -256,12 +260,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
       resume_text: resumeText,
       detected_skills: detectedSkills,
       additional_context: additionalContext,
-      provider: initialKey ? initialKey.provider : 'gemini',
+      provider: effectiveKey ? effectiveKey.provider : 'gemini',
       api_key: "",
-      key_id: initialKey ? initialKey.id : undefined,
+      key_id: effectiveKey ? effectiveKey.id : undefined,
       remember_key: true
     });
   };
+
 
   return (
     <div className="relative min-h-screen bg-white text-[#1A1A1A] pb-20 select-text">

@@ -174,8 +174,11 @@ export function App() {
     setFinalReport(null);
     setWarningsCount(0);
     setIsProctoringActive(false);
+    setSessionId("");
+    setConfig(null);
     setCurrentStep('landing');
   };
+
 
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans">
