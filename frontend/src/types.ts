@@ -137,4 +137,7 @@ export interface SavedCredentials {
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'Brutal';
   selected_rounds: RoundType[];
   additional_context: string;
+  active_resume_id?: string;
+  resume_text?: string;
 }
+

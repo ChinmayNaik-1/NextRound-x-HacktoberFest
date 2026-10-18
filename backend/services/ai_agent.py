@@ -317,7 +317,18 @@ Return a valid JSON object strictly matching this schema:
         execution_report: Optional[Dict[str, Any]] = None,
         submission_status: Optional[str] = "in_progress"
     ) -> str:
-        # Build live coding & execution context block
+        r_type = (round_type or "technical").lower()
+        latest_candidate_msg = ""
+        for m in reversed(messages):
+            if m.get("role") in ("user", "candidate"):
+                latest_candidate_msg = m.get("content", "")
+                break
+
+        is_skip_requested = any(term in latest_candidate_msg.lower() for term in [
+            "skip", "next topic", "next question", "different question", "different topic", "unable to answer", "don't know", "not sure"
+        ])
+
+        # Build live coding & execution context block for DSA rounds
         coding_context = ""
         if current_question:
             q_title = current_question.get("title", "Coding Problem")
@@ -342,46 +353,95 @@ Return a valid JSON object strictly matching this schema:
                         coding_context += f"First Failing Case: input={res.get('input')}, expected={res.get('expected')}, actual={res.get('actual')}\n"
                         break
 
-        sys_prompt = f"""You are a senior tech lead / engineering interviewer at {company} conducting a live {round_type} interview for {role}.
-Candidate Resume Highlights: {resume_summary}
+        # Round-specific instructions
+        if "technical" in r_type:
+            round_prompt_section = f"""You are conducting a high-level Technical Architecture, System Design, and CS Fundamentals interview for the {role} position at {company}.
+Candidate Resume Highlights: {resume_summary or 'General Software Engineering experience'}
 Tone / Style: {additional_context or 'Realistic, concise, encouraging yet rigorous.'}
+
+ROUND SPECIFIC RULES:
+1. This is a technical architecture & design discussion (NOT a live coding problem). Do NOT ask the candidate to write code or reference a coding prompt.
+2. Directly acknowledge and respond to what the candidate just said. If they greeted you, welcome them by name and pose a specific architectural question.
+3. CRITICAL: If the candidate requests to skip or is unable to answer ('{latest_candidate_msg}'), politely and supportively acknowledge ('No problem at all, let us pivot!') and immediately present a completely fresh, interesting technical architecture topic (e.g. database indexing, caching strategies, rate limiting, or event-driven architecture).
+4. Keep spoken responses concise (2 to 4 sentences maximum) for natural Text-to-Speech delivery."""
+        elif "hr" in r_type:
+            round_prompt_section = f"""You are conducting a Behavioral & Culture Fit (HR) interview for the {role} position at {company}.
+Candidate Resume Highlights: {resume_summary or 'Experienced Candidate'}
+Tone / Style: {additional_context or 'Empathetic, professional, observant.'}
+
+ROUND SPECIFIC RULES:
+1. Probe behavioral stories using the STAR framework (Situation, Task, Action, Result).
+2. Directly respond to the candidate's previous response with insightful follow-ups on leadership, collaboration, or handling ambiguity.
+3. If the candidate asks to skip or has no example: gracefully acknowledge and introduce an alternate scenario (e.g. working with difficult stakeholders or handling project delays).
+4. Keep spoken responses concise (2 to 3 sentences maximum)."""
+        else: # DSA / Algorithmic coding round
+            round_prompt_section = f"""You are conducting a live Data Structures & Algorithms coding interview for {role} at {company}.
+Candidate Resume Highlights: {resume_summary}
+Tone / Style: {additional_context or 'Encouraging technical mentor.'}
 
 {coding_context}
 
-CRITICAL INTERVIEWER GUIDELINES:
-1. You have direct visibility into the candidate's code and test results above. Always make your feedback directly relevant to their code, approach, and test status!
-2. If the candidate asks for help or is failing test cases: look at their actual code and the failing test case, and give a targeted conceptual hint (e.g. mention boundary conditions, negative numbers, or pointer edge cases) without writing the full solution for them.
-3. If the candidate has passed all test cases: congratulate them on passing all test cases, and challenge them to explain their asymptotic time and space complexity, or ask how they would optimize if the input scaled to billions.
-4. If the candidate has a compilation error: gently guide them to check syntax or variables around the error.
-5. If the candidate is explaining an algorithm or approach aloud: validate whether the idea is sound for this problem, mention tradeoffs (e.g. hash map vs two pointers), and encourage them.
-6. Keep spoken responses concise (2 to 4 sentences maximum) so that Text-to-Speech sounds natural and conversational. Avoid markdown headers, asterisks, bullet lists, or huge code blocks.
-"""
+ROUND SPECIFIC RULES:
+1. You have live visibility into their code and test case results above.
+2. If tests are failing or compilation fails, provide a conceptual hint based on the first failing case.
+3. If all tests pass, congratulate them and ask about asymptotic time and space complexity.
+4. If candidate asks to skip or feels stuck: offer a gentle hint or suggest analyzing a brute-force approach first.
+5. Keep spoken responses concise (2 to 3 sentences maximum)."""
+
         conv_str = ""
         for m in messages[-6:]:
-            role_label = "Interviewer" if m.get("role") == "assistant" else "Candidate"
+            role_label = "Interviewer" if m.get("role") in ("assistant", "interviewer") else "Candidate"
             conv_str += f"{role_label}: {m.get('content')}\n"
         
-        prompt = f"Recent Conversation:\n{conv_str}\nInterviewer (provide your next concise spoken response):"
-        reply = self.query_llm(prompt, sys_prompt)
+        prompt = f"{round_prompt_section}\n\nRecent Conversation:\n{conv_str}\nInterviewer (provide your next concise spoken response):"
+        reply = self.query_llm(prompt)
 
-        # Context-aware fallback if LLM is offline or exhausted
+        # Dynamic context-aware fallback if LLM is offline, key missing, or quota exhausted
         if not reply or not reply.strip():
-            if execution_report and execution_report.get("compilation_error"):
-                reply = f"I see a compilation error in your code: {execution_report.get('compilation_error')[:60]}. Take a look at your syntax and variable definitions."
-            elif execution_report and execution_report.get("all_passed"):
-                reply = f"Excellent job! Your code passed all test cases. Can you walk me through the asymptotic time and space complexity of your solution?"
-            elif execution_report and execution_report.get("total_cases", 0) > 0:
-                p = execution_report.get("passed_cases", 0)
-                t = execution_report.get("total_cases", 0)
-                reply = f"I see your code is currently passing {p} of {t} test cases. Consider edge cases like empty collections, negative numbers, or duplicates where your logic might behave unexpectedly."
-            elif candidate_code and len(candidate_code.strip()) > 30:
-                reply = f"Good progress on the code. Walk me through how you plan to handle the lookup and edge cases efficiently."
-            elif current_question:
-                reply = f"Take your time to understand {current_question.get('title', 'the problem')}. Feel free to start by discussing brute-force approaches before coding."
-            else:
-                reply = "Good points. Can you elaborate further on how that approach scales under heavy load?"
+            if is_skip_requested:
+                if "technical" in r_type:
+                    reply = "Understood, no worries at all! Let's pivot to a different topic. In high-scale web systems, how would you design a caching strategy with Redis to prevent cache stampedes and handle data invalidation?"
+                elif "hr" in r_type:
+                    reply = "No problem at all, let's switch gears. Tell me about a time you had to deliver a project with ambiguous or rapidly changing requirements."
+                else:
+                    reply = "No worries, let's take a step back. What if we simplified the input constraints—how would you approach this problem using a basic hash map or two-pointer technique?"
+            elif "technical" in r_type:
+                turns = len([m for m in messages if m.get("role") in ("user", "candidate")])
+                tech_topics = [
+                    "Can you walk me through the key architectural decisions in your most complex project and how you evaluated performance bottlenecks?",
+                    "How would you approach database indexing and query optimization when table sizes grow into hundreds of millions of rows?",
+                    "When designing a microservice architecture, how do you handle distributed transactions and ensure eventual consistency across services?",
+                    "Suppose our service experiences a sudden 10x traffic spike. What strategies would you implement for rate limiting and graceful degradation?",
+                    "How do you approach observability—metrics, distributed tracing, and structured logging—when troubleshooting a latency spike in production?"
+                ]
+                reply = tech_topics[(turns - 1) % len(tech_topics)]
+            elif "hr" in r_type:
+                turns = len([m for m in messages if m.get("role") in ("user", "candidate")])
+                hr_topics = [
+                    "Can you tell me about a time you had a technical disagreement with a team member and how you resolved it constructively?",
+                    "Describe a situation where a project missed a deadline or failed to meet expectations. What was your role and what did you learn?",
+                    "How do you prioritize competing deadlines when multiple high-urgency tasks arrive simultaneously?",
+                    "Tell me about a time you took initiative to solve a problem that was outside your direct area of responsibility."
+                ]
+                reply = hr_topics[(turns - 1) % len(hr_topics)]
+            else: # DSA
+                if execution_report and execution_report.get("compilation_error"):
+                    reply = f"I see a syntax or compilation error in your code: {execution_report.get('compilation_error')[:60]}. Check your variable definitions and syntax."
+                elif execution_report and execution_report.get("all_passed"):
+                    reply = "Excellent job! Your code passed all 10 test cases. Can you walk me through the asymptotic time and space complexity of your solution?"
+                elif execution_report and execution_report.get("total_cases", 0) > 0:
+                    p = execution_report.get("passed_cases", 0)
+                    t = execution_report.get("total_cases", 0)
+                    reply = f"Your code is currently passing {p} of {t} test cases. Consider edge cases like empty collections, negative inputs, or duplicates."
+                elif candidate_code and len(candidate_code.strip()) > 30:
+                    reply = "Good start on the code. Walk me through how you plan to handle the lookup and edge cases efficiently."
+                elif current_question:
+                    reply = f"Take your time to understand {current_question.get('title', 'the problem')}. Feel free to start by discussing brute-force approaches before writing code."
+                else:
+                    reply = "Good points. Can you elaborate further on how that approach scales under heavy load?"
 
         return reply
+
 
 
     def generate_final_report(self, interview_data: Dict[str, Any]) -> Dict[str, Any]:

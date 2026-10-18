@@ -12,14 +12,18 @@ import {
   Check,
   Trash2,
   Sparkles,
-  Plus
+  Plus,
+  Save,
+  CheckCircle2,
+  FolderOpen
 } from 'lucide-react';
-import { InterviewConfig, RoundType, NamedKey, SavedResume } from '../types';
+import { InterviewConfig, RoundType, NamedKey, SavedResume, SavedCredentials } from '../types';
 import {
   parseResumePdf,
   parseResumeText,
   fetchResumes,
   addSavedResume,
+  updateSavedResume,
   activateSavedResume,
   deleteSavedResume,
   getCachedResumes,
@@ -71,11 +75,12 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
   const [savedResumes, setSavedResumes] = useState<SavedResume[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState<string>("new");
   const [newResumeTitle, setNewResumeTitle] = useState("");
-  const [resumeText, setResumeText] = useState("");
+  const [resumeText, setResumeText] = useState(cachedCreds.resume_text || "");
   const [detectedSkills, setDetectedSkills] = useState<string[]>([]);
   const [isParsingResume, setIsParsingResume] = useState(false);
   const [resumeFileName, setResumeFileName] = useState("");
   const [isSavingResume, setIsSavingResume] = useState(false);
+  const [notification, setNotification] = useState<{ type: 'success' | 'info'; text: string } | null>(null);
 
   // Additional instructions
   const [additionalContext, setAdditionalContext] = useState(
@@ -86,9 +91,42 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
   // Hardware permission modal state
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
 
+  // Sync candidate profile state to local storage and backend
+  const syncProfile = (overrides?: Partial<SavedCredentials>) => {
+    saveCredentialsApi({
+      candidate_name: overrides?.candidate_name ?? candidateName,
+      dob: overrides?.dob ?? dob,
+      company: overrides?.company ?? company,
+      role: overrides?.role ?? role,
+      difficulty: overrides?.difficulty ?? difficulty,
+      selected_rounds: overrides?.selected_rounds ?? selectedRounds,
+      additional_context: overrides?.additional_context ?? additionalContext,
+      active_resume_id: overrides?.active_resume_id ?? (selectedResumeId !== "new" ? selectedResumeId : undefined),
+      resume_text: overrides?.resume_text ?? resumeText
+    });
+  };
+
   // Load Credentials & Saved Resumes on mount
   useEffect(() => {
-    fetchCredentials().then((creds) => {
+    // 1. Instant cache load
+    const cachedR = getCachedResumes();
+    if (cachedR.resumes.length > 0) {
+      setSavedResumes(cachedR.resumes);
+      const targetId = cachedCreds.active_resume_id || cachedR.active_resume_id;
+      const active = cachedR.resumes.find((r) => r.id === targetId) || cachedR.resumes.find((r) => r.is_active) || cachedR.resumes[0];
+      if (active) {
+        setSelectedResumeId(active.id);
+        setResumeText(active.raw_text);
+        setDetectedSkills(active.detected_skills || []);
+        setResumeFileName(active.file_name || active.title);
+        if (active.candidate_name && (!cachedCreds.candidate_name || cachedCreds.candidate_name === "Alex")) {
+          setCandidateName(active.candidate_name);
+        }
+      }
+    }
+
+    // 2. Refresh from backend
+    Promise.all([fetchCredentials(), fetchResumes()]).then(([creds, resumesData]) => {
       if (creds) {
         if (creds.candidate_name) setCandidateName(creds.candidate_name);
         if (creds.dob) setDob(creds.dob);
@@ -100,35 +138,19 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
         }
         if (creds.additional_context) setAdditionalContext(creds.additional_context);
       }
-    });
 
-    // Load cached resumes first
-    const cachedR = getCachedResumes();
-    if (cachedR.resumes.length > 0) {
-      setSavedResumes(cachedR.resumes);
-      const active = cachedR.resumes.find((r) => r.is_active) || cachedR.resumes[0];
-      if (active) {
-        setSelectedResumeId(active.id);
-        setResumeText(active.raw_text);
-        setDetectedSkills(active.detected_skills || []);
-        setResumeFileName(active.file_name || active.title);
-        if (active.candidate_name && active.candidate_name !== "Alex") {
-          setCandidateName(active.candidate_name);
-        }
-      }
-    }
-
-    // Refresh from backend
-    fetchResumes().then((res) => {
-      setSavedResumes(res.resumes);
-      if (res.resumes.length > 0) {
-        const active = res.resumes.find((r) => r.id === res.active_resume_id) || res.resumes[0];
-        setSelectedResumeId(active.id);
-        setResumeText(active.raw_text);
-        setDetectedSkills(active.detected_skills || []);
-        setResumeFileName(active.file_name || active.title);
-        if (active.candidate_name && active.candidate_name !== "Alex") {
-          setCandidateName(active.candidate_name);
+      if (resumesData && resumesData.resumes.length > 0) {
+        setSavedResumes(resumesData.resumes);
+        const targetId = creds?.active_resume_id || resumesData.active_resume_id;
+        const active = resumesData.resumes.find((r) => r.id === targetId) || resumesData.resumes.find(r => r.is_active) || resumesData.resumes[0];
+        if (active) {
+          setSelectedResumeId(active.id);
+          setResumeText(active.raw_text);
+          setDetectedSkills(active.detected_skills || []);
+          setResumeFileName(active.file_name || active.title);
+          if (active.candidate_name && (!creds?.candidate_name || creds.candidate_name === "Alex")) {
+            setCandidateName(active.candidate_name);
+          }
         }
       }
     });
@@ -142,6 +164,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
       setDetectedSkills([]);
       setResumeFileName("");
       setNewResumeTitle("");
+      syncProfile({ active_resume_id: "", resume_text: "" });
       return;
     }
     const found = savedResumes.find((r) => r.id === id);
@@ -149,10 +172,17 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
       setResumeText(found.raw_text);
       setDetectedSkills(found.detected_skills || []);
       setResumeFileName(found.file_name || found.title);
-      if (found.candidate_name) {
+      if (found.candidate_name && (!candidateName || candidateName === "Alex")) {
         setCandidateName(found.candidate_name);
       }
       await activateSavedResume(found.id);
+      syncProfile({
+        candidate_name: found.candidate_name || candidateName,
+        active_resume_id: found.id,
+        resume_text: found.raw_text
+      });
+      setNotification({ type: 'success', text: `Loaded saved resume: "${found.title}"` });
+      setTimeout(() => setNotification(null), 3000);
     }
   };
 
@@ -169,7 +199,9 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
       setSavedResumes(updated.resumes);
       setSelectedResumeId(res.resume.id);
       setNewResumeTitle("");
-      alert(`Resume "${title}" saved successfully to your local profiles!`);
+      syncProfile({ active_resume_id: res.resume.id, resume_text: resumeText });
+      setNotification({ type: 'success', text: `Resume "${title}" saved to your profiles!` });
+      setTimeout(() => setNotification(null), 4000);
     } catch (err: any) {
       alert(err.message || "Failed to save resume");
     } finally {
@@ -177,8 +209,40 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
     }
   };
 
-  const handleDeleteResume = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleUpdateCurrentResume = async () => {
+    if (!resumeText.trim()) {
+      alert("Resume text cannot be empty.");
+      return;
+    }
+    if (selectedResumeId === "new") {
+      handleSaveCurrentResume();
+      return;
+    }
+    setIsSavingResume(true);
+    try {
+      const current = savedResumes.find((r) => r.id === selectedResumeId);
+      const title = newResumeTitle.trim() || current?.title || `${candidateName}'s Resume`;
+      await updateSavedResume(selectedResumeId, {
+        title,
+        raw_text: resumeText,
+        candidate_name: candidateName,
+        file_name: resumeFileName || current?.file_name,
+        detected_skills: detectedSkills
+      });
+      const updated = await fetchResumes();
+      setSavedResumes(updated.resumes);
+      syncProfile({ active_resume_id: selectedResumeId, resume_text: resumeText });
+      setNotification({ type: 'success', text: `Resume "${title}" updated successfully!` });
+      setTimeout(() => setNotification(null), 4000);
+    } catch (err: any) {
+      alert(err.message || "Failed to update resume");
+    } finally {
+      setIsSavingResume(false);
+    }
+  };
+
+  const handleDeleteResume = async (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (confirm("Delete this saved resume profile?")) {
       await deleteSavedResume(id);
       const updated = await fetchResumes();
@@ -189,60 +253,111 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
         setResumeText(next.raw_text);
         setDetectedSkills(next.detected_skills || []);
         setResumeFileName(next.file_name || next.title);
+        syncProfile({ active_resume_id: next.id, resume_text: next.raw_text });
       } else {
         setSelectedResumeId("new");
         setResumeText("");
         setDetectedSkills([]);
         setResumeFileName("");
+        syncProfile({ active_resume_id: "", resume_text: "" });
       }
+      setNotification({ type: 'info', text: "Resume profile deleted." });
+      setTimeout(() => setNotification(null), 3000);
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const baseTitle = file.name.replace(/\.[^/.]+$/, "");
     setResumeFileName(file.name);
-    setNewResumeTitle(file.name.replace(/\.[^/.]+$/, ""));
+    setNewResumeTitle(baseTitle);
     setIsParsingResume(true);
+    setNotification(null);
     try {
+      let rawText = "";
+      let skills: string[] = [];
       if (file.type === "application/pdf") {
         const res = await parseResumePdf(file);
-        setResumeText(res.raw_text);
-        setDetectedSkills(res.detected_skills || []);
+        rawText = res.raw_text;
+        skills = res.detected_skills || [];
       } else {
         const text = await file.text();
         const res = await parseResumeText(text);
-        setResumeText(res.raw_text);
-        setDetectedSkills(res.detected_skills || []);
+        rawText = res.raw_text;
+        skills = res.detected_skills || [];
       }
-    } catch (err) {
+      setResumeText(rawText);
+      setDetectedSkills(skills);
+
+      // Automatically persist to database so candidate never has to re-upload
+      if (rawText.trim()) {
+        const titleToSave = baseTitle || `${candidateName || 'Candidate'}'s Resume`;
+        const saveRes = await addSavedResume(titleToSave, rawText, candidateName, file.name, skills);
+        if (saveRes?.resume) {
+          const updated = await fetchResumes();
+          setSavedResumes(updated.resumes);
+          setSelectedResumeId(saveRes.resume.id);
+          syncProfile({
+            candidate_name: candidateName,
+            active_resume_id: saveRes.resume.id,
+            resume_text: rawText
+          });
+          setNotification({
+            type: 'success',
+            text: `Resume "${titleToSave}" uploaded and saved to your profiles!`
+          });
+          setTimeout(() => setNotification(null), 4000);
+        }
+      }
+    } catch (err: any) {
       console.error(err);
+      alert(err.message || "Failed to parse resume file");
     } finally {
       setIsParsingResume(false);
     }
   };
 
   const toggleRound = (round: RoundType) => {
+    let next: RoundType[];
     if (selectedRounds.includes(round)) {
       if (selectedRounds.length === 1) return; // Keep at least one round
-      setSelectedRounds(selectedRounds.filter((r) => r !== round));
+      next = selectedRounds.filter((r) => r !== round);
     } else {
-      setSelectedRounds([...selectedRounds, round]);
+      next = [...selectedRounds, round];
     }
+    setSelectedRounds(next);
+    syncProfile({ selected_rounds: next });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Persist credentials
-    saveCredentialsApi({
-      candidate_name: candidateName,
-      dob,
-      company,
-      role,
-      difficulty,
-      selected_rounds: selectedRounds,
-      additional_context: additionalContext
+    let currentResumeId = selectedResumeId;
+
+    // Auto-save if user entered or pasted text in new mode
+    if (resumeText.trim() && selectedResumeId === "new") {
+      const title = newResumeTitle.trim() || resumeFileName || `${candidateName || 'Candidate'}'s Resume`;
+      try {
+        const saved = await addSavedResume(title, resumeText, candidateName, resumeFileName, detectedSkills);
+        if (saved?.resume?.id) {
+          currentResumeId = saved.resume.id;
+          setSelectedResumeId(saved.resume.id);
+          const updated = await fetchResumes();
+          setSavedResumes(updated.resumes);
+        }
+      } catch (err) {
+        console.warn("Failed to auto-save new resume:", err);
+      }
+    } else if (currentResumeId !== "new") {
+      activateSavedResume(currentResumeId).catch(() => {});
+    }
+
+    // Persist full candidate profile
+    syncProfile({
+      active_resume_id: currentResumeId !== "new" ? currentResumeId : undefined,
+      resume_text: resumeText
     });
+
     setShowPermissionsModal(true);
   };
 
@@ -266,7 +381,6 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
       remember_key: true
     });
   };
-
 
   return (
     <div className="relative min-h-screen bg-white text-[#1A1A1A] pb-20 select-text">
@@ -519,53 +633,111 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
               </span>
             </div>
 
-            {/* Resume Selection Dropdown */}
-            <div className="bg-[#F8F9FA] p-3.5 rounded-xl border border-gray-200 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-800">
-                    Select Resume Profile
+            {/* Notification alert */}
+            {notification && (
+              <div className={`p-2.5 rounded-lg text-xs flex items-center gap-2 transition-all ${
+                notification.type === 'success'
+                  ? 'bg-green-50 text-brand-green border border-green-200'
+                  : 'bg-blue-50 text-brand-blue border border-blue-200'
+              }`}>
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span className="font-medium">{notification.text}</span>
+              </div>
+            )}
+
+            {/* Resume Selection Dropdown & Controls */}
+            <div className="bg-[#F8F9FA] p-4 rounded-xl border border-gray-200 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs font-semibold text-gray-900 mb-0.5 flex items-center gap-1.5">
+                    <FolderOpen className="w-4 h-4 text-brand-purple" />
+                    <span>Select Resume Profile:</span>
                   </label>
                   <span className="text-[11px] text-gray-500">
-                    Choose from previously saved resumes or upload a new one
+                    Switch between saved resumes or upload a new one for this session
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <select
                     value={selectedResumeId}
                     onChange={handleSelectResume}
-                    className="px-3 py-1.5 bg-white rounded-lg border border-gray-300 text-xs font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 shadow-sm cursor-pointer"
+                    className="px-3 py-1.5 bg-white rounded-lg border-2 border-brand-purple/40 text-xs font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-purple shadow-sm cursor-pointer min-w-[200px]"
                   >
-                    <option value="new">+ Upload / Paste New Resume</option>
+                    <option value="new">➕ + Upload / Paste New Resume</option>
                     {savedResumes.map((r) => (
                       <option key={r.id} value={r.id}>
-                        {r.title} {r.candidate_name ? `(${r.candidate_name})` : ''}
+                        📄 {r.title} {r.candidate_name ? `(${r.candidate_name})` : ''}
                       </option>
                     ))}
                   </select>
 
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedResumeId("new");
+                      setResumeText("");
+                      setDetectedSkills([]);
+                      setResumeFileName("");
+                      setNewResumeTitle("");
+                    }}
+                    className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 text-gray-700 font-medium transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                    title="Start fresh new resume"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-brand-blue" />
+                    <span>New</span>
+                  </button>
+
                   {selectedResumeId !== 'new' && (
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteResume(selectedResumeId, e)}
-                      className="text-xs text-red-500 hover:text-red-700 p-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors cursor-pointer"
-                      title="Delete this saved resume"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleUpdateCurrentResume}
+                        disabled={isSavingResume}
+                        className="text-xs px-2.5 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-brand-purple font-medium transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                        title="Save edits back to this saved resume"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>{isSavingResume ? "Saving..." : "Update Resume"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteResume(selectedResumeId, e)}
+                        className="text-xs text-red-500 hover:text-red-700 p-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors cursor-pointer shadow-xs"
+                        title="Delete this saved resume"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
 
+              {/* Status info banner */}
+              {selectedResumeId !== 'new' ? (
+                <div className="bg-purple-50/70 border border-purple-200 rounded-lg p-2.5 flex items-center justify-between text-xs text-brand-purple">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Active Profile: <strong>{savedResumes.find(r => r.id === selectedResumeId)?.title || "Resume"}</strong> {resumeFileName ? `(${resumeFileName})` : ''}</span>
+                  </div>
+                  <span className="text-[11px] font-mono text-purple-600">Auto-saved in local database</span>
+                </div>
+              ) : (
+                <div className="bg-blue-50/60 border border-blue-200 rounded-lg p-2.5 text-xs text-brand-blue flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 shrink-0" />
+                  <span>Upload a PDF or paste text below. It will <strong>automatically save to your resume library</strong> and appear in the dropdown above for all future interviews.</span>
+                </div>
+              )}
+
               {/* Upload Dropzone & Text Area */}
               <div className="flex flex-col md:flex-row gap-3 pt-1">
-                <label className="flex-1 border-2 border-dashed border-gray-300 hover:border-brand-blue rounded-xl p-5 text-center cursor-pointer transition-colors bg-white flex flex-col items-center justify-center">
+                <label className="flex-1 border-2 border-dashed border-gray-300 hover:border-brand-purple rounded-xl p-5 text-center cursor-pointer transition-colors bg-white flex flex-col items-center justify-center">
                   <Upload className="w-6 h-6 text-gray-400 mb-1" />
                   <span className="text-xs font-semibold text-gray-700">
-                    {resumeFileName || (selectedResumeId === 'new' ? "Upload Resume (PDF / TXT)" : "Replace with new file")}
+                    {isParsingResume ? "Parsing resume..." : (resumeFileName || (selectedResumeId === 'new' ? "Upload Resume (PDF / TXT)" : "Replace with new file"))}
                   </span>
-                  <span className="text-[10px] text-gray-400 mt-0.5">Click or drag & drop</span>
+                  <span className="text-[10px] text-gray-400 mt-0.5">Click or drag & drop — auto-saved to library</span>
                   <input
                     type="file"
                     accept=".pdf,.txt"
@@ -580,7 +752,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                     onChange={(e) => setResumeText(e.target.value)}
                     placeholder="Or paste resume text here (projects, skills, experience)..."
                     rows={3}
-                    className="w-full p-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 text-xs font-mono text-gray-700 leading-relaxed bg-white"
+                    className="w-full p-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-purple/30 text-xs font-mono text-gray-700 leading-relaxed bg-white"
                   />
                 </div>
               </div>
@@ -605,7 +777,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                     className="px-4 py-1.5 bg-brand-purple hover:bg-purple-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0"
                   >
                     <Check className="w-3.5 h-3.5" />
-                    <span>{isSavingResume ? "Saving..." : "Save Resume Profile"}</span>
+                    <span>{isSavingResume ? "Saving..." : "Save to Profiles Library"}</span>
                   </button>
                 </div>
               )}

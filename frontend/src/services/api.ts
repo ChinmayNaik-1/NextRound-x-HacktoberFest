@@ -213,6 +213,36 @@ export async function deleteSavedResume(resume_id: string): Promise<boolean> {
   return false;
 }
 
+export async function updateSavedResume(
+  resume_id: string,
+  data: {
+    title?: string;
+    raw_text?: string;
+    candidate_name?: string;
+    file_name?: string;
+    detected_skills?: string[];
+  }
+): Promise<{ status: string; resume: SavedResume } | null> {
+  try {
+    const res = await fetch(`${API_BASE}/resumes/${resume_id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    if (res.ok) {
+      const result = await res.json();
+      const cached = getCachedResumes();
+      cached.resumes = cached.resumes.map((r) => (r.id === resume_id ? { ...r, ...result.resume } : r));
+      setCachedResumes(cached);
+      return result;
+    }
+  } catch (e) {
+    console.warn("Failed to update resume:", e);
+  }
+  return null;
+}
+
+
 // ---------------- Candidate Credentials Persistence ----------------
 
 export function getCachedCredentials(): SavedCredentials {
@@ -472,13 +502,19 @@ export async function sendInterviewChat(
     });
     if (res.ok) {
       const data = await res.json();
-      return data.reply;
+      if (data && data.reply) {
+        return data.reply;
+      }
     }
-  } catch (e) {
-    console.error("sendInterviewChat error", e);
+    const errData = await res.json().catch(() => ({ detail: "Chat server error" }));
+    console.error("sendInterviewChat HTTP Error:", res.status, errData);
+    return `[Backend Notice: HTTP ${res.status}] ${errData.detail || "AI service returned an unexpected response. Please verify your active API key."}`;
+  } catch (e: any) {
+    console.error("sendInterviewChat connection error", e);
+    return `[Offline Notice]: Could not connect to local InterviewAI backend on port 8000 (${e.message || "Connection refused"}). Please ensure the local backend server is running.`;
   }
-  return "That makes sense. Can you walk me through the key architectural decisions you made in that project and how you evaluated performance bottlenecks?";
 }
+
 
 
 export async function finishInterviewSession(

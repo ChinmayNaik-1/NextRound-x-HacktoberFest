@@ -10,7 +10,7 @@ from services.db import (
     init_db, add_api_key, list_api_keys, get_api_key_by_id,
     set_active_api_key, get_active_api_key, delete_api_key,
     save_interview, get_interview, list_past_interviews,
-    add_resume, list_resumes, get_active_resume, set_active_resume, delete_resume,
+    add_resume, update_resume, list_resumes, get_active_resume, set_active_resume, delete_resume,
     save_setting, get_setting
 )
 from services.question_bank import get_question_for_company, QUESTIONS_DB
@@ -201,6 +201,27 @@ def remove_resume_endpoint(resume_id: str):
         raise HTTPException(status_code=404, detail="Resume not found")
     return {"status": "success", "message": "Resume deleted."}
 
+class UpdateResumeRequest(BaseModel):
+    title: Optional[str] = None
+    raw_text: Optional[str] = None
+    candidate_name: Optional[str] = None
+    file_name: Optional[str] = None
+    detected_skills: Optional[List[str]] = None
+
+@app.put("/api/resumes/{resume_id}")
+def edit_resume_endpoint(resume_id: str, req: UpdateResumeRequest):
+    updated = update_resume(
+        resume_id=resume_id,
+        title=req.title,
+        raw_text=req.raw_text,
+        candidate_name=req.candidate_name,
+        file_name=req.file_name,
+        detected_skills=req.detected_skills
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return {"status": "success", "resume": updated, "message": "Resume updated."}
+
 # ==================== Candidate Credentials / Preferences ====================
 
 class SaveCredentialsRequest(BaseModel):
@@ -211,6 +232,8 @@ class SaveCredentialsRequest(BaseModel):
     difficulty: Optional[str] = "Medium"
     selected_rounds: Optional[List[str]] = ["dsa_1", "technical", "hr"]
     additional_context: Optional[str] = ""
+    active_resume_id: Optional[str] = ""
+    resume_text: Optional[str] = ""
 
 @app.get("/api/credentials")
 def get_saved_credentials():
@@ -221,7 +244,9 @@ def get_saved_credentials():
         "role": "Software Engineer (SDE I/II)",
         "difficulty": "Medium",
         "selected_rounds": ["dsa_1", "technical", "hr"],
-        "additional_context": "Maintain a realistic technical bar. Ask probing follow-ups on performance bottlenecks and edge cases."
+        "additional_context": "Maintain a realistic technical bar. Ask probing follow-ups on performance bottlenecks and edge cases.",
+        "active_resume_id": "",
+        "resume_text": ""
     })
     return creds
 

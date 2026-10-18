@@ -250,6 +250,40 @@ def add_resume(title: str, raw_text: str, candidate_name: str = "", file_name: s
         "is_active": make_active
     }
 
+def update_resume(resume_id: str, title: Optional[str] = None, raw_text: Optional[str] = None, candidate_name: Optional[str] = None, file_name: Optional[str] = None, detected_skills: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM resumes WHERE id = ?", (resume_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+    
+    current = dict(row)
+    new_title = title if title is not None else current["title"]
+    new_raw_text = raw_text if raw_text is not None else current["raw_text"]
+    new_cand = candidate_name if candidate_name is not None else current["candidate_name"]
+    new_file = file_name if file_name is not None else current["file_name"]
+    new_skills = json.dumps(detected_skills) if detected_skills is not None else current["detected_skills"]
+    
+    cursor.execute("""
+        UPDATE resumes
+        SET title = ?, raw_text = ?, candidate_name = ?, file_name = ?, detected_skills = ?
+        WHERE id = ?
+    """, (new_title.strip(), new_raw_text.strip(), (new_cand or "").strip(), (new_file or "").strip(), new_skills, resume_id))
+    conn.commit()
+    conn.close()
+    return {
+        "id": resume_id,
+        "title": new_title,
+        "candidate_name": new_cand,
+        "file_name": new_file,
+        "raw_text": new_raw_text,
+        "detected_skills": detected_skills if detected_skills is not None else json.loads(current["detected_skills"] or "[]"),
+        "is_active": bool(current["is_active"])
+    }
+
+
 def list_resumes() -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
