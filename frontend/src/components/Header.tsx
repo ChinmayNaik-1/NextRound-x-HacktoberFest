@@ -89,8 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         <div className="flex items-center gap-1 text-xs text-gray-500 font-mono bg-gray-50 border border-gray-200 px-2 py-1 rounded-md">
-          <Terminal className="w-3 h-3 text-gray-400" />
-          <span>Gemma / Gemini 2.0</span>
+          <span>HacktoberFest'26</span>
         </div>
       </div>
     </header>
