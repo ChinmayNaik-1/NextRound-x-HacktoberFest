@@ -20,23 +20,12 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-30 w-full bg-white/90 backdrop-blur-md border-b border-[#EBEBEB] px-6 py-3.5 flex items-center justify-between">
       {/* Brand Logo & Name */}
       <div className="flex items-center gap-3">
-        {/* Antigravity Boomerang Icon */}
-        <div className="relative w-7 h-7 flex items-center justify-center">
-          <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
-            <defs>
-              <linearGradient id="agyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#3186FF" />
-                <stop offset="30%" stopColor="#00B95C" />
-                <stop offset="70%" stopColor="#FBBC04" />
-                <stop offset="100%" stopColor="#FC413D" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M 20 85 C 45 40, 55 40, 80 85 C 65 30, 35 30, 20 85 Z"
-              fill="url(#agyGrad)"
-            />
-          </svg>
-        </div>
+        <img
+          src={theme === 'dark' ? '/dark.png' : '/light.png'}
+          alt=""
+          aria-hidden="true"
+          className="h-7 w-7 object-contain drop-shadow-sm"
+        />
 
         <div className="flex items-center gap-2">
           <span className="font-medium text-[1.125rem] tracking-tight text-[#1A1A1A]">
