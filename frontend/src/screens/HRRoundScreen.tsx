@@ -9,12 +9,15 @@ import {
   User,
   Sparkles,
   Award,
-  SkipForward
+  SkipForward,
+  Square,
+  Send
 } from 'lucide-react';
 import { InterviewConfig, ChatMessage } from '../types';
 import { sendInterviewChat } from '../services/api';
 import { VoiceOrb } from '../components/VoiceOrb';
 import { CameraFeed } from '../components/CameraFeed';
+import { SpeechService } from '../services/speechService';
 
 interface HRRoundScreenProps {
   config: InterviewConfig;
@@ -83,65 +86,70 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // TTS & STT
+  // Clean up speech on unmount
+  useEffect(() => {
+    return () => {
+      SpeechService.stopSpeaking();
+      SpeechService.stopListening();
+    };
+  }, []);
+
+  // TTS & STT with explicit Push-to-Talk and Interruptibility
   const speakText = (text: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.05;
-    utterance.pitch = 1.0;
-    utterance.onstart = () => {
-      setAiStatus('speaking');
-      setAiCaption(text);
-    };
-    utterance.onend = () => {
-      setAiStatus('listening');
-      setAiCaption("Listening to your response... (Speak now)");
-      startMicRecognition();
-    };
-    window.speechSynthesis.speak(utterance);
+    setAiStatus('speaking');
+    setAiCaption(text);
+    SpeechService.speak(
+      text,
+      () => {
+        setAiStatus('speaking');
+        setAiCaption(text);
+      },
+      () => {
+        setAiStatus('idle');
+        setAiCaption("Interviewer finished speaking. Click 'Start Speaking' or type your response when ready.");
+      },
+      () => {
+        setAiStatus('idle');
+        setAiCaption("Ready for your response.");
+      }
+    );
+  };
+
+  const handleInterrupt = () => {
+    SpeechService.stopSpeaking();
+    setAiStatus('idle');
+    setAiCaption("Interrupted interviewer. You can speak or type your answer now.");
   };
 
   const startMicRecognition = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
+    SpeechService.stopSpeaking();
+    setIsListeningMic(true);
+    setAiStatus('listening');
+    setAiCaption("Listening to your voice... (Click 'Send' or 'Stop Mic' when done)");
 
-      recognition.onstart = () => {
-        setIsListeningMic(true);
-        setAiStatus('listening');
-      };
-
-      recognition.onresult = (event: any) => {
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            const finalTranscript = event.results[i][0].transcript;
-            handleUserResponse(finalTranscript);
-          }
-        }
-      };
-
-      recognition.onerror = () => {
+    SpeechService.startListening(
+      (interim) => {
+        // live interim transcript
+      },
+      (finalText) => {
+        setTypedInput((prev) => (prev ? prev + " " + finalText : finalText));
+      },
+      (err) => {
+        console.warn("Speech recognition error:", err);
         setIsListeningMic(false);
-        setAiStatus('idle');
-      };
-
-      recognition.start();
-      speechRecognitionRef.current = recognition;
-    } catch (e) {
-      console.warn("Speech rec err", e);
-    }
+      },
+      () => {
+        setIsListeningMic(false);
+      }
+    );
   };
 
   const stopMicRecognition = () => {
-    if (speechRecognitionRef.current) {
-      speechRecognitionRef.current.stop();
-      setIsListeningMic(false);
+    SpeechService.stopListening();
+    setIsListeningMic(false);
+    if (aiStatus === 'listening') {
       setAiStatus('idle');
+      setAiCaption("Mic stopped. Review your response and click 'Send'.");
     }
   };
 
@@ -224,7 +232,16 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
         {/* Left: Animated Voice Orb */}
         <div className="w-1/2 flex flex-col items-center justify-center p-8 bg-[#FAFAFA] border-r border-gray-200 relative">
           <div className="max-w-md text-center space-y-6">
-            <VoiceOrb status={aiStatus} size="lg" caption={aiCaption} />
+            {/* Interruption Button when AI is speaking */}
+            {aiStatus === 'speaking' && (
+              <button
+                onClick={handleInterrupt}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-pill bg-brand-red/10 text-brand-red border border-brand-red/30 hover:bg-brand-red/20 text-xs font-semibold transition-all shadow-sm cursor-pointer animate-pulse"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>Interrupt Interviewer & Answer</span>
+              </button>
+            )}
 
             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-left space-y-2">
               <span className="text-xs font-semibold text-gray-800 flex items-center gap-1.5">
@@ -243,15 +260,16 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
             <div className="space-y-2 w-full">
               <div className="flex items-center gap-2 w-full">
                 <button
+                  type="button"
                   onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
-                  className={`px-4 py-2 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all ${
+                  className={`px-4 py-2 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
                     isListeningMic
                       ? "bg-red-500 text-white animate-pulse"
                       : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm"
                   }`}
                 >
                   {isListeningMic ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4 text-gray-400" />}
-                  <span>{isListeningMic ? "Mic Active..." : "Push to Speak"}</span>
+                  <span>{isListeningMic ? "Mic Active (Stop)" : "Start Speaking"}</span>
                 </button>
 
                 <input
@@ -267,6 +285,21 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
                   placeholder="Or type behavioral response..."
                   className="flex-1 px-4 py-2 rounded-pill border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-green/30 bg-white"
                 />
+
+                <button
+                  type="button"
+                  disabled={!typedInput.trim()}
+                  onClick={() => {
+                    if (typedInput.trim()) {
+                      handleUserResponse(typedInput);
+                      setTypedInput("");
+                    }
+                  }}
+                  className="px-4 py-2 bg-brand-green hover:bg-[#009b4d] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-pill text-xs font-medium flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                >
+                  <span>Send</span>
+                  <Send className="w-3.5 h-3.5" />
+                </button>
               </div>
 
               {/* Quick Skip Question Button */}

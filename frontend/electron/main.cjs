@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -77,6 +77,18 @@ ipcMain.on('toggle-fullscreen', () => {
 });
 
 app.whenReady().then(() => {
+  // Automatically permit camera and microphone in Electron
+  if (session && session.defaultSession) {
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+      const allowed = ['media', 'camera', 'microphone', 'fullscreen'];
+      callback(allowed.includes(permission) || permission.startsWith('media'));
+    });
+
+    session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+      return true;
+    });
+  }
+
   startBackend();
   createWindow();
 

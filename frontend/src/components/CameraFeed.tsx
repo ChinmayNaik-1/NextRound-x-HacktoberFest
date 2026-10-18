@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, CameraOff, Mic, MicOff } from 'lucide-react';
+import { Camera, CameraOff } from 'lucide-react';
 
 interface CameraFeedProps {
   isPiP?: boolean;
@@ -9,7 +9,6 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [hasCamera, setHasCamera] = useState(true);
-  const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
 
   useEffect(() => {
@@ -18,7 +17,6 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
       try {
         const s = await navigator.mediaDevices.getUserMedia({
           video: { width: 320, height: 240, frameRate: 15 },
-          audio: true,
         });
         activeStream = s;
         setStream(s);
@@ -26,7 +24,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
           videoRef.current.srcObject = s;
         }
       } catch (err) {
-        console.warn("Camera/Mic not accessible or denied:", err);
+        console.warn("Camera not accessible or denied (optional preview only):", err);
         setHasCamera(false);
       }
     }
@@ -39,15 +37,6 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
       }
     };
   }, []);
-
-  const toggleMic = () => {
-    if (stream) {
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !track.enabled;
-      });
-      setIsMuted(!isMuted);
-    }
-  };
 
   const toggleCamera = () => {
     if (stream) {
@@ -92,16 +81,9 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
         {/* Floating Quick Action Overlay */}
         <div className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-1 rounded-full">
           <button
-            onClick={toggleMic}
-            title={isMuted ? "Unmute Mic" : "Mute Mic"}
-            className="text-white hover:text-gray-300 transition-colors p-0.5"
-          >
-            {isMuted ? <MicOff className="w-3.5 h-3.5 text-brand-red" /> : <Mic className="w-3.5 h-3.5" />}
-          </button>
-          <button
             onClick={toggleCamera}
             title={isCameraOff ? "Turn Camera On" : "Turn Camera Off"}
-            className="text-white hover:text-gray-300 transition-colors p-0.5"
+            className="text-white hover:text-gray-300 transition-colors p-0.5 cursor-pointer"
           >
             {isCameraOff ? <CameraOff className="w-3.5 h-3.5 text-brand-red" /> : <Camera className="w-3.5 h-3.5" />}
           </button>

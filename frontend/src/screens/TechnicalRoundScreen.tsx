@@ -10,10 +10,13 @@ import {
   Sparkles,
   User,
   Bot,
-  SkipForward
+  SkipForward,
+  Square,
+  Send
 } from 'lucide-react';
 import { InterviewConfig, ChatMessage } from '../types';
 import { sendInterviewChat } from '../services/api';
+import { SpeechService } from '../services/speechService';
 import { VoiceOrb } from '../components/VoiceOrb';
 import { CameraFeed } from '../components/CameraFeed';
 
@@ -91,63 +94,60 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
 
   // TTS & STT
   const speakText = (text: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.05;
-    utterance.pitch = 1.0;
-    utterance.onstart = () => {
-      setAiStatus('speaking');
-      setAiCaption(text);
-    };
-    utterance.onend = () => {
-      setAiStatus('listening');
-      setAiCaption("Listening to your response... (Speak now)");
-      startMicRecognition();
-    };
-    window.speechSynthesis.speak(utterance);
+    setAiStatus('speaking');
+    setAiCaption(text);
+    SpeechService.speak(
+      text,
+      () => {
+        setAiStatus('speaking');
+        setAiCaption(text);
+      },
+      () => {
+        setAiStatus('idle');
+        setAiCaption("Interviewer finished speaking. Click 'Start Speaking' or type your answer when ready.");
+      },
+      () => {
+        setAiStatus('idle');
+        setAiCaption("Ready for your answer.");
+      }
+    );
+  };
+
+  const handleInterrupt = () => {
+    SpeechService.stopSpeaking();
+    setAiStatus('idle');
+    setAiCaption("Interrupted interviewer. You can speak or type your answer now.");
   };
 
   const startMicRecognition = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
+    SpeechService.stopSpeaking();
+    setIsListeningMic(true);
+    setAiStatus('listening');
+    setAiCaption("Listening to your voice... (Click 'Send Answer' or 'Stop Mic' when done)");
 
-      recognition.onstart = () => {
-        setIsListeningMic(true);
-        setAiStatus('listening');
-      };
-
-      recognition.onresult = (event: any) => {
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            const finalTranscript = event.results[i][0].transcript;
-            handleUserResponse(finalTranscript);
-          }
-        }
-      };
-
-      recognition.onerror = () => {
+    SpeechService.startListening(
+      (interim) => {
+        // Live interim feedback
+      },
+      (finalText) => {
+        setTypedInput((prev) => (prev ? prev + " " + finalText : finalText));
+      },
+      (err) => {
+        console.warn("Speech recognition error:", err);
         setIsListeningMic(false);
-        setAiStatus('idle');
-      };
-
-      recognition.start();
-      speechRecognitionRef.current = recognition;
-    } catch (e) {
-      console.warn("Speech rec start err", e);
-    }
+      },
+      () => {
+        setIsListeningMic(false);
+      }
+    );
   };
 
   const stopMicRecognition = () => {
-    if (speechRecognitionRef.current) {
-      speechRecognitionRef.current.stop();
-      setIsListeningMic(false);
+    SpeechService.stopListening();
+    setIsListeningMic(false);
+    if (aiStatus === 'listening') {
       setAiStatus('idle');
+      setAiCaption("Mic stopped. Review your response and click 'Send Answer'.");
     }
   };
 
@@ -156,7 +156,7 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
     stopMicRecognition();
     addMessage("user", text);
     setAiStatus('thinking');
-    setAiCaption("Evaluating technical depth and formulating follow-up...");
+    setAiCaption("Evaluating technical depth and formulating response...");
 
     const reply = await sendInterviewChat(
       'technical',
@@ -245,19 +245,34 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
               </ul>
             </div>
 
+            {/* Interruption Button when AI is speaking */}
+            {aiStatus === 'speaking' && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={handleInterrupt}
+                  className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 px-4 py-2 rounded-pill text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-sm animate-pulse transition-all"
+                >
+                  <Square className="w-3.5 h-3.5 fill-amber-700" />
+                  <span>Interrupt Interviewer & Answer</span>
+                </button>
+              </div>
+            )}
+
             {/* Quick Spoken / Typed Control */}
             <div className="space-y-2 w-full">
               <div className="flex items-center gap-2 w-full">
                 <button
+                  type="button"
                   onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
-                  className={`px-4 py-2 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all ${
+                  className={`px-4 py-2 rounded-pill text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
                     isListeningMic
-                      ? "bg-red-500 text-white animate-pulse"
+                      ? "bg-red-500 text-white animate-pulse shadow-md"
                       : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm"
                   }`}
                 >
                   {isListeningMic ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4 text-gray-400" />}
-                  <span>{isListeningMic ? "Mic Active..." : "Push to Speak"}</span>
+                  <span>{isListeningMic ? "Mic Listening..." : "Start Speaking"}</span>
                 </button>
 
                 <input
@@ -270,9 +285,22 @@ export const TechnicalRoundScreen: React.FC<TechnicalRoundScreenProps> = ({
                       setTypedInput("");
                     }
                   }}
-                  placeholder="Or type technical response..."
+                  placeholder="Spoken words appear here or type..."
                   className="flex-1 px-4 py-2 rounded-pill border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30 bg-white"
                 />
+
+                <button
+                  type="button"
+                  disabled={!typedInput.trim()}
+                  onClick={() => {
+                    handleUserResponse(typedInput);
+                    setTypedInput("");
+                  }}
+                  className="btn-primary text-xs px-4 py-2 flex items-center gap-1.5 disabled:opacity-40 cursor-pointer shadow-sm"
+                >
+                  <span>Send</span>
+                  <Send className="w-3.5 h-3.5" />
+                </button>
               </div>
 
               {/* Quick Skip Question Button */}

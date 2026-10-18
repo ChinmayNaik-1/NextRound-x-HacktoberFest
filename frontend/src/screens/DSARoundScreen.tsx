@@ -16,13 +16,15 @@ import {
   Sparkles,
   AlertCircle,
   SkipForward,
-  HelpCircle
+  HelpCircle,
+  Square
 } from 'lucide-react';
 import { InterviewConfig, Question, ExecutionReport, CodeAnalysis, ChatMessage } from '../types';
 import { fetchCompanyQuestion, runCode, analyzeCode, sendInterviewChat } from '../services/api';
 import { CameraFeed } from '../components/CameraFeed';
 import { VoiceOrb } from '../components/VoiceOrb';
 import { useTheme } from '../ThemeContext';
+import { SpeechService } from '../services/speechService';
 
 interface DSARoundScreenProps {
   roundName: string; // "DSA Round 1" or "DSA Round 2"
@@ -75,13 +77,6 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
       const greeting = `Welcome ${config.candidate_name} to your ${roundName} for ${config.company}. You have 25 minutes to review the problem and submit an optimal solution. Feel free to explain your approach aloud as you code.`;
       speakText(greeting);
       addMessage("assistant", greeting);
-
-      // End greeting after 12 seconds
-      setTimeout(() => {
-        setIsGreetingPhase(false);
-        setAiStatus('idle');
-        setAiCaption("AI Interviewer is observing. Feel free to ask questions.");
-      }, 12000);
     }
     init();
   }, [config.company, config.difficulty]);
@@ -121,73 +116,70 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // 3. Web Speech API (TTS & STT)
+  // Clean up speech on unmount
+  useEffect(() => {
+    return () => {
+      SpeechService.stopSpeaking();
+      SpeechService.stopListening();
+    };
+  }, []);
+
+  // 3. SpeechService (TTS & STT with push-to-talk & interruption)
   const speakText = (text: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.05;
-    utterance.pitch = 1.0;
-    utterance.onstart = () => {
-      setAiStatus('speaking');
-      setAiCaption(text);
-    };
-    utterance.onend = () => {
-      setAiStatus('idle');
-      setAiCaption("AI Interviewer is listening...");
-    };
-    window.speechSynthesis.speak(utterance);
+    setAiStatus('speaking');
+    setAiCaption(text);
+    SpeechService.speak(
+      text,
+      () => {
+        setAiStatus('speaking');
+        setAiCaption(text);
+      },
+      () => {
+        setAiStatus('idle');
+        setAiCaption("AI Interviewer is observing. Feel free to ask questions or discuss your approach.");
+      },
+      () => {
+        setAiStatus('idle');
+        setAiCaption("Ready for questions or discussion.");
+      }
+    );
+  };
+
+  const handleInterrupt = () => {
+    SpeechService.stopSpeaking();
+    setAiStatus('idle');
+    setAiCaption("Interrupted interviewer. You can speak or type your question/explanation now.");
   };
 
   const startMicRecognition = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Speech recognition not supported in this browser engine. You can type in the voice bar below!");
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    SpeechService.stopSpeaking();
+    setIsListeningMic(true);
+    setAiStatus('listening');
+    setAiCaption("Listening to your voice... (Click 'Send' or 'Stop Mic' when done)");
 
-    recognition.onstart = () => {
-      setIsListeningMic(true);
-      setAiStatus('listening');
-      setAiCaption("Listening to your voice... Speak your thoughts aloud.");
-    };
-
-    recognition.onresult = (event: any) => {
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          const finalTranscript = event.results[i][0].transcript;
-          handleUserSpokenMessage(finalTranscript);
-        } else {
-          interim += event.results[i][0].transcript;
-        }
+    SpeechService.startListening(
+      (interim) => {
+        // live interim
+      },
+      (finalText) => {
+        setUserInputText((prev) => (prev ? prev + " " + finalText : finalText));
+      },
+      (err) => {
+        console.warn("Speech recognition error", err);
+        setIsListeningMic(false);
+      },
+      () => {
+        setIsListeningMic(false);
       }
-    };
-
-    recognition.onerror = (err: any) => {
-      console.warn("Speech recognition error", err);
-      setIsListeningMic(false);
-      setAiStatus('idle');
-    };
-
-    recognition.onend = () => {
-      setIsListeningMic(false);
-      setAiStatus('idle');
-    };
-
-    recognition.start();
-    speechRecognitionRef.current = recognition;
+    );
   };
 
   const stopMicRecognition = () => {
-    if (speechRecognitionRef.current) {
-      speechRecognitionRef.current.stop();
-      setIsListeningMic(false);
+    SpeechService.stopListening();
+    setIsListeningMic(false);
+    if (aiStatus === 'listening') {
       setAiStatus('idle');
+      setAiCaption("Mic stopped. Review your question and click 'Send'.");
     }
   };
 
@@ -585,28 +577,40 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-gray-900">
-                AI Interviewer (Google)
+                AI Interviewer ({config.company})
               </span>
               <span className="w-1.5 h-1.5 rounded-full bg-brand-green animate-ping" />
             </div>
-            <p className="text-xs text-gray-600 max-w-xl truncate">
+            <p className="text-xs text-gray-600 max-w-sm truncate">
               {aiCaption}
             </p>
           </div>
+
+          {aiStatus === 'speaking' && (
+            <button
+              onClick={handleInterrupt}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-brand-red/10 text-brand-red border border-brand-red/30 hover:bg-brand-red/20 text-xs font-semibold transition-all shadow-sm cursor-pointer animate-pulse shrink-0 ml-2"
+              title="Interrupt interviewer and speak"
+            >
+              <Square className="w-3 h-3 fill-current" />
+              <span>Interrupt</span>
+            </button>
+          )}
         </div>
 
-        {/* Center: Live Spoken Transcript Input & Mic Toggle */}
-        <div className="flex items-center gap-2 max-w-md w-full">
+        {/* Center: Live Spoken Transcript Input, Mic Toggle, and Send Button */}
+        <div className="flex items-center gap-2 max-w-lg w-full">
           <button
+            type="button"
             onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
-            className={`px-3 py-1.5 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
               isListeningMic
                 ? "bg-red-500 hover:bg-red-600 text-white animate-pulse"
                 : "bg-gray-100 hover:bg-gray-200 text-gray-800"
             }`}
           >
             {isListeningMic ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5 text-gray-500" />}
-            <span>{isListeningMic ? "Mic Listening..." : "Enable Mic"}</span>
+            <span>{isListeningMic ? "Mic Active (Stop)" : "Start Speaking"}</span>
           </button>
 
           <input
@@ -619,9 +623,24 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
                 setUserInputText("");
               }
             }}
-            placeholder="Speak or type your explanation to the interviewer..."
+            placeholder="Speak or type explanation to interviewer..."
             className="flex-1 px-3 py-1.5 rounded-pill border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
           />
+
+          <button
+            type="button"
+            disabled={!userInputText.trim()}
+            onClick={() => {
+              if (userInputText.trim()) {
+                handleUserSpokenMessage(userInputText);
+                setUserInputText("");
+              }
+            }}
+            className="px-3.5 py-1.5 bg-brand-blue hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-pill text-xs font-medium flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0"
+          >
+            <span>Send</span>
+            <Send className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
