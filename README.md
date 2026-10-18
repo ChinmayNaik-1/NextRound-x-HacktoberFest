@@ -1,4 +1,10 @@
-# NextRound 🚀
+<div align="center">
+
+<img width="128" alt="NextRound" src="https://github.com/user-attachments/assets/13d17d5c-6545-467f-bb3a-c34e7fc7bf0c" />
+   
+<h1> NextRound </h1>
+
+</div>
 
 ### AI-Powered Open Interview Practice Platform
 
@@ -11,6 +17,53 @@ Instead of simply solving static coding problems or reading interview questions,
 The goal is simple:
 
 **Make high-quality interview practice more accessible, reusable, and collaborative.**
+
+---
+
+
+## Table of Contents
+
+- [The Problem](#-the-problem)
+- [Our Solution](#-our-solution)
+- [What Makes NextRound Different?](#-what-makes-nextround-different)
+- [Evidence-Based Evaluation](#-evidence-based-evaluation)
+- [AI for Open Innovation](#-ai-for-open-innovation)
+- [Open by Design](#-open-by-design)
+- [Multi-Provider AI Architecture](#-multi-provider-ai-architecture)
+- [Open Source Architecture](#-open-source-architecture)
+- [Interview Question Pipeline](#-interview-question-pipeline)
+- [Coding Experience](#-coding-experience)
+- [Conversational Interview](#-conversational-interview)
+- [Candidate Performance Report](#-candidate-performance-report)
+- [What Happens at 100× Scale?](#-what-happens-at-100-scale)
+- [Project Structure](#-project-structure)
+- [Installation](#installation)
+  - [Clone the repository](#1-clone-the-repository)
+  - [Backend setup](#2-backend-setup)
+  - [Frontend setup](#3-frontend-setup)
+- [AI Provider Configuration](#-ai-provider-configuration)
+- [API Key Handling](#-api-key-handling)
+- [AI Safety & Reliability](#-ai-safety--reliability)
+- [Future Roadmap](#-future-roadmap)
+  - [Community Question Marketplace](#-community-question-marketplace)
+  - [Community Contributions](#-community-contributions)
+  - [Multilingual Interviews](#-multilingual-interviews)
+  - [Campus Mode](#-campus-mode)
+  - [Learning Loop](#-learning-loop)
+- [Contributing](#-contributing)
+- [Contribution Ideas](#-contribution-ideas)
+- [Why Open Source Matters](#-why-open-source-matters)
+- [Alignment with "AI for Open Innovation"](#-alignment-with-ai-for-open-innovation)
+  - [Makes knowledge and opportunities more accessible](#1-makes-knowledge-and-opportunities-more-accessible)
+  - [Makes AI useful for a real group of users](#2-makes-ai-useful-for-a-real-group-of-users)
+  - [Easy for others to build upon](#3-easy-for-others-to-build-upon)
+  - [Open and collaborative](#4-open-and-collaborative)
+- [Impact](#-impact)
+- [Vision](#-vision)
+- [Built for Hacktoberfest](#-built-for-hacktoberfest)
+- [License](#-license)
+- [Team](#-team)
+
 
 ---
 
