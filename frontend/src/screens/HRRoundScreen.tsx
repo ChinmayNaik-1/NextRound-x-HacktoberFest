@@ -290,6 +290,8 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
         {/* Left: Animated Voice Orb */}
         <div className="w-1/2 flex flex-col items-center justify-center p-8 bg-[#FAFAFA] border-r border-gray-200 relative">
           <div className="max-w-md text-center space-y-6">
+            <VoiceOrb status={aiStatus} size="lg" caption={aiCaption} />
+
             {/* Interruption Button when AI is speaking */}
             {aiStatus === 'speaking' && (
               <button

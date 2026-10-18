@@ -55,8 +55,8 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
       </div>
 
       {/* State Caption */}
-      <div className="text-center">
-        <p className="text-sm font-medium text-gray-800">
+      <div className="text-center max-w-sm px-2">
+        <p className="text-sm font-semibold tracking-tight text-gray-900 leading-snug line-clamp-3">
           {caption || (
             status === 'speaking'
               ? "Interviewer is speaking..."
@@ -67,8 +67,8 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
               : "AI Ready"
           )}
         </p>
-        <span className="text-xs text-gray-400">
-          {status === 'listening' ? "Microphone active" : "Voice synthesizer active"}
+        <span className="inline-block mt-1 text-[11px] font-mono tracking-wide uppercase text-gray-400">
+          {status === 'listening' ? "● Microphone active" : "● Voice synthesizer active"}
         </span>
       </div>
     </div>

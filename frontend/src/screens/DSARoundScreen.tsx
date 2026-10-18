@@ -121,6 +121,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [activeTab, setActiveTab] = useState<number>(0);
   const [isExecuting, setIsExecuting] = useState(false);
   const [execReport, setExecReport] = useState<ExecutionReport | null>(null);
+  const [codeAnalysis, setCodeAnalysis] = useState<CodeAnalysis | null>(null);
 
   // Sync latest live progress to parent session state
   useEffect(() => {
@@ -153,7 +154,6 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [mainAreaPercent, setMainAreaPercent] = useState(74);
   const [interviewerPanePercent, setInterviewerPanePercent] = useState(38);
 
-  const [codeAnalysis, setCodeAnalysis] = useState<CodeAnalysis | null>(null);
   const [showSkipModal, setShowSkipModal] = useState(false);
 
   const speechRecognitionRef = useRef<any>(null);

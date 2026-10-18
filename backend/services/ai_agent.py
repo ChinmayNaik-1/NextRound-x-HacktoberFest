@@ -11,15 +11,14 @@ def resolve_gemini_model(api_key: str) -> Optional[str]:
         
         # Priority list of modern, active Gemini models
         priority_models = [
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-pro",
             "gemini-flash-lite-latest",
-            "gemini-3.1-flash-lite",
-            "gemini-3.5-flash",
-            "gemini-3.8-flash",
-            "gemini-flash-latest",
-            "gemini-2.5-flash-lite",
             "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-pro-latest"
+            "gemini-flash-latest"
         ]
         
         # 1. Try listing models from Google API
@@ -149,8 +148,8 @@ class AIAgent:
             genai.configure(api_key=self.api_key)
             
             # Resolve or use candidate models
-            model_to_use = self.model or resolve_gemini_model(self.api_key) or "gemini-flash-lite-latest"
-            candidates = [model_to_use, "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest"]
+            model_to_use = self.model or resolve_gemini_model(self.api_key) or "gemini-1.5-flash"
+            candidates = [model_to_use, "gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-flash-lite-latest", "gemini-flash-latest"]
             
             for m_name in dict.fromkeys(candidates):
                 try:
