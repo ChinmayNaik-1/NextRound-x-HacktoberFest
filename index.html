@@ -1,1 +1,183 @@
-sample
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NextRound | Open-source AI mock interviews</title>
+  <meta name="description" content="NextRound is an open-source desktop app that runs a full AI mock interview: DSA, technical and HR rounds, real code execution and an evidence-based report.">
+  <meta name="theme-color" content="#3d5f58">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav" id="top">
+    <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span>NextRound</a>
+    <button class="nav-toggle" aria-expanded="false" aria-controls="menu">Menu</button>
+    <nav id="menu" class="menu">
+      <a href="#about">About</a>
+      <a href="#rounds">Rounds</a>
+      <a href="#how">How it works</a>
+      <a href="#faq">FAQ</a>
+      <a class="btn btn-sm" href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest/releases" data-download>Download</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <p class="date-pill">Hacktoberfest 2026 · Open source · Free</p>
+      <h1>Practice the interview, <em>not just the problem.</em></h1>
+      <p class="lead">NextRound is an open-source desktop app with an AI interviewer that asks, listens, reads your code and follows up. Bring your own API key. Everything stays on your machine.</p>
+      <div class="actions">
+        <a class="btn" href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest/releases" data-download><span data-os-label>Download NextRound</span></a>
+        <a class="btn btn-ghost" href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest">View on GitHub</a>
+      </div>
+      <p class="small">Free, MIT licensed. Works with Gemini, OpenAI, Groq and Anthropic keys.</p>
+
+      <ul class="stickers" aria-hidden="true">
+        <li class="sticker s1">DSA</li>
+        <li class="sticker s2">Technical</li>
+        <li class="sticker s3">HR</li>
+        <li class="sticker s4">Report</li>
+      </ul>
+    </section>
+
+    <section class="band" aria-label="Providers">
+      <p>Works with</p>
+      <ul><li>Google Gemini</li><li>OpenAI</li><li>Groq</li><li>Anthropic</li></ul>
+    </section>
+
+    <section class="section" id="about">
+      <div class="two">
+        <div>
+          <p class="eyebrow">Introduction</p>
+          <h2>What is <em>NextRound?</em></h2>
+        </div>
+        <div class="prose">
+          <p><strong>A full mock interview, from setup to scorecard.</strong> Pick a company, role and difficulty, then work through coding, technical and HR rounds with an interviewer that reacts to what you say.</p>
+          <p>Most platforms only check whether your code passes. NextRound also asks the questions an interviewer would: why this approach, what is the complexity, what breaks at 100x the input.</p>
+          <p>It is built for Hacktoberfest and open to contributions: swap in a model, add a language, write a question pack.</p>
+          <a class="link" href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest#-contributing">Read the contributing guide</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section tint" id="rounds">
+      <p class="eyebrow">What you get</p>
+      <h2>Four rounds. <em>One honest report.</em></h2>
+      <div class="grid">
+        <article class="card">
+          <h3>DSA coding rounds</h3>
+          <p>Monaco editor with Python, C++ and Java. Run 5 open cases or submit against 10, 5 of them hidden. Real execution, no faked passes.</p>
+        </article>
+        <article class="card">
+          <h3>Technical round</h3>
+          <p>A spoken discussion on architecture, system design and your resume projects, with follow-ups that depend on your answers.</p>
+        </article>
+        <article class="card">
+          <h3>HR round</h3>
+          <p>Behavioral questions framed around STAR, with a different scenario whenever you say you have no example.</p>
+        </article>
+        <article class="card">
+          <h3>Voice and typing</h3>
+          <p>Speak with push-to-talk and interrupt the interviewer, or type. Speech is transcribed through your own provider.</p>
+        </article>
+        <article class="card">
+          <h3>Proctored mode</h3>
+          <p>Fullscreen guard and a 3-strike focus monitor, plus a camera self-view that is never stored or uploaded.</p>
+        </article>
+        <article class="card">
+          <h3>Evidence-based scorecard</h3>
+          <p>Coding scores come from test results. Only rounds you finished are scored. You get strengths, gaps and next steps.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="how">
+      <p class="eyebrow">How it works</p>
+      <h2>Download, add a key, <em>start talking.</em></h2>
+      <ol class="steps">
+        <li>
+          <span class="num">01</span>
+          <h3>Download the app</h3>
+          <p>Grab the latest build from GitHub Releases and open it.</p>
+        </li>
+        <li>
+          <span class="num">02</span>
+          <h3>Add your API key</h3>
+          <p>Paste a Gemini, OpenAI, Groq or Anthropic key. It is saved in a local database on your device.</p>
+        </li>
+        <li>
+          <span class="num">03</span>
+          <h3>Set up and interview</h3>
+          <p>Choose company, role, difficulty and rounds. Optionally add your resume, then begin.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="section tint run">
+      <div class="two">
+        <div>
+          <p class="eyebrow">Run from source</p>
+          <h2>Prefer to <em>hack on it?</em></h2>
+          <p class="prose-p">Python backend with FastAPI, React and Vite frontend, wrapped in Electron.</p>
+        </div>
+        <div class="code-wrap">
+          <pre id="clone-code"><code>git clone https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest.git
+cd NextRound-x-HacktoberFest/backend
+python -m venv venv &amp;&amp; pip install -r requirements.txt
+cd ../frontend &amp;&amp; npm install
+npm run electron:dev</code></pre>
+          <button class="btn btn-sm btn-ghost" id="copy-btn" type="button">Copy commands</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta" id="download">
+      <h2>Your next round is <em>one download away.</em></h2>
+      <p>Free, open source and ready for your pull requests.</p>
+      <div class="actions center">
+        <a class="btn btn-light" href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest/releases" data-download><span data-os-label>Download NextRound</span></a>
+        <a class="btn btn-outline" href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest">Star on GitHub</a>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <p class="eyebrow">Common questions</p>
+      <h2>Everything else, <em>answered.</em></h2>
+      <div class="faq">
+        <details>
+          <summary>Does it cost anything?</summary>
+          <p>NextRound is free and MIT licensed. You pay only for the API usage on your own provider key.</p>
+        </details>
+        <details>
+          <summary>Where does my data go?</summary>
+          <p>Keys, resumes and past interviews live in a local SQLite database. Prompts and answers go to the AI provider you choose. Camera video is never stored or uploaded.</p>
+        </details>
+        <details>
+          <summary>Which languages can I code in?</summary>
+          <p>Python, C++ and Java. C++ and Java need g++ or javac available on your PATH.</p>
+        </details>
+        <details>
+          <summary>How do I contribute?</summary>
+          <p>Fork the repo, create a feature branch, test locally and open a pull request. Ideas range from UI polish to new providers, languages and question packs.</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p><strong>NextRound</strong> · Built for Hacktoberfest 2026 · MIT License</p>
+    <p>
+      <a href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest">GitHub</a>
+      <a href="https://github.com/ChinmayNaik-1/NextRound-x-HacktoberFest/releases">Releases</a>
+      <a href="https://hacktoberfest.com/">Hacktoberfest</a>
+    </p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
