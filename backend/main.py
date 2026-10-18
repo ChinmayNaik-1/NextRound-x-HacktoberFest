@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from services.db import (
     init_db, add_api_key, list_api_keys, get_api_key_by_id,
     set_active_api_key, get_active_api_key, delete_api_key,
-    save_interview, get_interview, list_past_interviews,
+    save_interview, get_interview, list_past_interviews, delete_interview,
     add_resume, update_resume, list_resumes, get_active_resume, set_active_resume, delete_resume,
     save_setting, get_setting
 )
@@ -403,6 +403,12 @@ def finish_interview_session(req: FinishInterviewRequest):
 @app.get("/api/interview/history")
 def get_interview_history():
     return list_past_interviews()
+
+@app.delete("/api/interview/history/{interview_id}")
+def delete_interview_history(interview_id: str):
+    if not delete_interview(interview_id):
+        raise HTTPException(status_code=404, detail="Interview not found")
+    return {"status": "success", "message": "Interview deleted."}
 
 if __name__ == "__main__":
     import uvicorn

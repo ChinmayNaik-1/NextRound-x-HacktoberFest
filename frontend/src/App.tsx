@@ -180,8 +180,10 @@ export function App() {
   };
 
 
+  const isDSARound = currentStep === 'dsa_1' || currentStep === 'dsa_2';
+
   return (
-    <div className="min-h-screen bg-white flex flex-col font-sans">
+    <div className={`${isDSARound ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-white flex flex-col font-sans`}>
       {/* Brand Header */}
       <Header
         currentRound={
@@ -208,7 +210,7 @@ export function App() {
       />
 
       {/* Screens */}
-      <main className="flex-1 flex flex-col">
+      <main className={`flex-1 flex flex-col ${isDSARound ? 'min-h-0 overflow-hidden' : ''}`}>
         {currentStep === 'landing' && (
           <LandingScreen
             onStartSetup={handleStartSetup}
