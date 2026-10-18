@@ -11,7 +11,8 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
-  BarChart3
+  BarChart3,
+  House
 } from 'lucide-react';
 import { FinalReport, InterviewConfig, ChatMessage } from '../types';
 import { ParticleCanvas } from '../components/ParticleCanvas';
@@ -302,13 +303,22 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
 
         {/* Footer Actions */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 pt-6 border-t border-gray-200">
-          <button
-            onClick={handlePrint}
-            className="btn-secondary text-xs px-4 py-2 flex items-center gap-1.5"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print / Save PDF Report</span>
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-3">
+            <button
+              onClick={handlePrint}
+              className="btn-secondary text-xs px-4 py-2 flex items-center gap-1.5"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print / Save PDF Report</span>
+            </button>
+            <button
+              onClick={onRestart}
+              className="btn-secondary text-xs px-4 py-2 flex items-center gap-1.5"
+            >
+              <House className="w-3.5 h-3.5" />
+              <span>Return to Home</span>
+            </button>
+          </div>
 
           <button
             onClick={onRestart}
