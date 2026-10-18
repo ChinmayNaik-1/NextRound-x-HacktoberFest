@@ -1,0 +1,85 @@
+import React from 'react';
+import { ShieldCheck, Sparkles, Terminal } from 'lucide-react';
+
+interface HeaderProps {
+  currentRound?: string;
+  isProctoringActive?: boolean;
+  warningsCount?: number;
+}
+
+export const Header: React.FC<HeaderProps> = ({
+  currentRound,
+  isProctoringActive = false,
+  warningsCount = 0,
+}) => {
+  return (
+    <header className="sticky top-0 z-30 w-full bg-white/90 backdrop-blur-md border-b border-[#EBEBEB] px-6 py-3.5 flex items-center justify-between">
+      {/* Brand Logo & Name */}
+      <div className="flex items-center gap-3">
+        {/* Antigravity Boomerang Icon */}
+        <div className="relative w-7 h-7 flex items-center justify-center">
+          <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
+            <defs>
+              <linearGradient id="agyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#3186FF" />
+                <stop offset="30%" stopColor="#00B95C" />
+                <stop offset="70%" stopColor="#FBBC04" />
+                <stop offset="100%" stopColor="#FC413D" />
+              </linearGradient>
+            </defs>
+            <path
+              d="M 20 85 C 45 40, 55 40, 80 85 C 65 30, 35 30, 20 85 Z"
+              fill="url(#agyGrad)"
+            />
+          </svg>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-[1.125rem] tracking-tight text-[#1A1A1A]">
+            Google Antigravity
+          </span>
+          <span className="text-gray-300 font-light">|</span>
+          <span className="text-sm font-normal text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-pill flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-brand-blue" />
+            InterviewAI
+          </span>
+        </div>
+      </div>
+
+      {/* Center Status: Active Round Badge if in session */}
+      {currentRound && (
+        <div className="hidden md:flex items-center gap-2 bg-[#F8F9FA] border border-[#E5E7EB] px-3.5 py-1 rounded-pill">
+          <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
+          <span className="text-xs font-medium text-gray-700 tracking-wide uppercase">
+            Active: {currentRound}
+          </span>
+        </div>
+      )}
+
+      {/* Right Controls: Proctoring Shield & Warnings */}
+      <div className="flex items-center gap-3">
+        {isProctoringActive && (
+          <div className="flex items-center gap-2">
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium border ${
+              warningsCount === 0
+                ? "bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]"
+                : warningsCount === 1
+                ? "bg-[#FEF7E0] text-[#B06000] border-[#FEEFC3]"
+                : "bg-[#FCE8E6] text-[#C5221F] border-[#FAD2CF]"
+            }`}>
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>
+                {warningsCount === 0 ? "Anti-Cheat Active" : `Warnings: ${warningsCount}/3`}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 text-xs text-gray-500 font-mono bg-gray-50 border border-gray-200 px-2 py-1 rounded-md">
+          <Terminal className="w-3 h-3 text-gray-400" />
+          <span>Gemma / Gemini 2.0</span>
+        </div>
+      </div>
+    </header>
+  );
+};

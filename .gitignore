@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+backend/venv/
+
+# Build artifacts
+dist/
+dist-electron/
+*.pyc
+__pycache__/
+*.db
+.tmp/
+
+# OS files
+Thumbs.db
+.DS_Store
