@@ -9,6 +9,7 @@
     "build": "npm run build:frontend",
     "build:frontend": "npm --prefix frontend run build",
     "package:backend": "npm --prefix frontend run package:backend",
-    "dist:win": "npm run package:backend && npm --prefix frontend run dist:win"
+    "installer:win": "npm --prefix frontend run installer:win",
+    "dist:win": "npm run package:backend && npm run build:frontend && npm run installer:win"
   }
 }

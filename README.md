@@ -823,8 +823,6 @@ From the repository root:
 
 ```powershell
 npm install --prefix frontend
-npm run build:frontend
-npm run package:backend
 npm run dist:win
 ```
 
@@ -834,7 +832,7 @@ npm run dist:win
 frontend/release/NextRound-Setup.exe
 ```
 
-The backend packaging script creates an isolated `backend/.build-venv`; it does not use the application's development virtual environment. `npm run electron:dev` remains the development workflow and Electron starts/stops the local backend itself.
+To run the stages separately, use `npm run build:frontend`, `npm run package:backend`, and `npm run installer:win`, in that order. The installer builder stages its temporary files under the Windows temporary directory before copying the installer to `frontend/release`; this avoids filesystem rename failures when the repository is on a different drive. The backend packaging script creates an isolated `backend/.build-venv`; it does not use the application's development virtual environment. `npm run electron:dev` remains the development workflow and Electron starts/stops the local backend itself.
 
 ## Publish a GitHub Release
 

@@ -13,7 +13,8 @@
     "electron:dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173\" \"wait-on -l http-get://127.0.0.1:5173 && electron .\"",
     "start": "electron .",
     "package:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build-backend.ps1",
-    "dist:win": "npm run build && electron-builder --win nsis --x64"
+    "installer:win": "node ../scripts/build-installer.cjs",
+    "dist:win": "npm run build && npm run installer:win"
   },
   "devDependencies": {
     "@monaco-editor/react": "^4.7.0",

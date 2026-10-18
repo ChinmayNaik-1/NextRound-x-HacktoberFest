@@ -67,7 +67,6 @@ $pyinstallerArgs = @(
     "--hidden-import", "services.resume_parser",
     "--hidden-import", "services.speech",
     "--hidden-import", "collections",
-    "--hidden-import", "collections.abc",
     "--hidden-import", "heapq",
     "--hidden-import", "bisect",
     "--hidden-import", "itertools",
