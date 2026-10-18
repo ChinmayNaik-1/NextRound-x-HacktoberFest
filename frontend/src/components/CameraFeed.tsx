@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, CameraOff, ChevronDown, ChevronUp, ArrowUpDown, Video } from 'lucide-react';
+import { Camera, CameraOff, ChevronDown, ChevronUp, Move } from 'lucide-react';
 
 interface CameraFeedProps {
   isPiP?: boolean;
@@ -11,7 +11,9 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
   const [hasCamera, setHasCamera] = useState(true);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [position, setPosition] = useState<'top' | 'bottom'>('top');
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const dragStartRef = useRef<{ pointerX: number; pointerY: number; left: number; top: number } | null>(null);
+  const cameraBoxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let activeStream: MediaStream | null = null;
@@ -47,6 +49,23 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
     }
   }, [isMinimized, stream]);
 
+  useEffect(() => {
+    const keepCameraInView = () => {
+      const bounds = cameraBoxRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+
+      setPosition((current) => {
+        if (!current) return current;
+        const clamped = clampPosition(current.left, current.top, bounds.width, bounds.height);
+        return clamped.left === current.left && clamped.top === current.top ? current : clamped;
+      });
+    };
+
+    window.addEventListener('resize', keepCameraInView);
+    keepCameraInView();
+    return () => window.removeEventListener('resize', keepCameraInView);
+  }, [isMinimized]);
+
   const toggleCamera = () => {
     if (stream) {
       stream.getVideoTracks().forEach((track) => {
@@ -56,9 +75,47 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
     }
   };
 
-  const togglePosition = () => {
-    setPosition((prev) => (prev === 'top' ? 'bottom' : 'top'));
+  const clampPosition = (left: number, top: number, width: number, height: number) => ({
+    left: Math.max(0, Math.min(left, window.innerWidth - width)),
+    top: Math.max(0, Math.min(top, window.innerHeight - height)),
+  });
+
+  const startDragging = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    const bounds = cameraBoxRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStartRef.current = {
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      left: bounds.left,
+      top: bounds.top,
+    };
+    setPosition({ left: bounds.left, top: bounds.top });
   };
+
+  const dragCamera = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragStart = dragStartRef.current;
+    const bounds = cameraBoxRef.current?.getBoundingClientRect();
+    if (!dragStart || !bounds) return;
+
+    setPosition(clampPosition(
+      dragStart.left + event.clientX - dragStart.pointerX,
+      dragStart.top + event.clientY - dragStart.pointerY,
+      bounds.width,
+      bounds.height
+    ));
+  };
+
+  const stopDragging = () => {
+    dragStartRef.current = null;
+  };
+
+  const floatingPositionStyle = position
+    ? { left: position.left, top: position.top }
+    : { top: 80, right: 24 };
 
   if (!isPiP) {
     return (
@@ -86,9 +143,12 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
 
   // Minimized Pill representation (Never blocks anything)
   if (isMinimized) {
-    const pillPosition = position === 'top' ? 'top-16 right-6' : 'bottom-28 right-6';
     return (
-      <div className={`fixed ${pillPosition} z-40 transition-all`}>
+      <div
+        ref={cameraBoxRef}
+        className="fixed z-40"
+        style={floatingPositionStyle}
+      >
         <button
           type="button"
           onClick={() => setIsMinimized(false)}
@@ -106,20 +166,26 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
   }
 
   // Expanded PiP floating window
-  // Placed at top-20 right-6 or bottom-28 right-6 (safely above the bottom response console)
-  const posClass = position === 'top' ? 'top-20 right-6' : 'bottom-28 right-6';
-
   return (
     <div
-      className={`fixed ${posClass} z-40 w-52 bg-gray-900 rounded-xl overflow-hidden shadow-2xl border border-gray-700/80 transition-all`}
+      ref={cameraBoxRef}
+      className="fixed z-40 w-52 bg-gray-900 rounded-xl overflow-hidden shadow-2xl border border-gray-700/80"
+      style={floatingPositionStyle}
     >
       {/* Top Controls Bar */}
-      <div className="bg-black/70 backdrop-blur-sm px-2.5 py-1.5 flex items-center justify-between border-b border-gray-800 text-white">
+      <div
+        className="bg-black/70 backdrop-blur-sm px-2.5 py-1.5 flex items-center justify-between border-b border-gray-800 text-white cursor-grab active:cursor-grabbing touch-none"
+        onPointerDown={startDragging}
+        onPointerMove={dragCamera}
+        onPointerUp={stopDragging}
+        onPointerCancel={stopDragging}
+      >
         <div className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
           <span className="text-[10px] font-semibold tracking-wider uppercase text-gray-200">
             Preview
           </span>
+          <Move className="w-3 h-3 text-gray-500" />
         </div>
 
         <div className="flex items-center gap-1">
@@ -131,16 +197,6 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
             className="p-1 text-gray-300 hover:text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
           >
             {isCameraOff ? <CameraOff className="w-3 h-3 text-brand-red" /> : <Camera className="w-3 h-3" />}
-          </button>
-
-          {/* Toggle Position Top / Bottom */}
-          <button
-            type="button"
-            onClick={togglePosition}
-            title={position === 'top' ? "Move to Bottom" : "Move to Top"}
-            className="p-1 text-gray-300 hover:text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
-          >
-            <ArrowUpDown className="w-3 h-3" />
           </button>
 
           {/* Minimize Button */}
