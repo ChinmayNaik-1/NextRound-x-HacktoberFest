@@ -18,6 +18,14 @@ The goal is simple:
 
 **Make high-quality interview practice more accessible, reusable, and collaborative.**
 
+<img width="1920" height="1080" alt="Screenshot (21)" src="https://github.com/user-attachments/assets/934164e4-2114-4de7-9b70-1c11a81ef0d5" />
+<img width="1920" height="1080" alt="Screenshot (22)" src="https://github.com/user-attachments/assets/3520b7e8-8289-46c0-9255-887b71c8c93a" />
+<img width="1920" height="1080" alt="Screenshot (26)" src="https://github.com/user-attachments/assets/00fb46b0-ee7e-44a3-9db8-dcf704037cc5" />
+<img width="1920" height="1080" alt="Screenshot (29)" src="https://github.com/user-attachments/assets/802b4673-41df-4a91-a43e-0197b590b3a3" />
+<img width="1920" height="1080" alt="Screenshot (31)" src="https://github.com/user-attachments/assets/b8ae8b0a-db72-4c1f-9cbe-09d70214505e" />
+<img width="1920" height="1080" alt="Screenshot (34)" src="https://github.com/user-attachments/assets/c7a663bb-f565-44b2-a56c-671205f1ac68" />
+
+
 ---
 
 
