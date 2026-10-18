@@ -177,7 +177,7 @@ def run_python_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dic
 
 # -------------------- C++ RUNNER --------------------
 
-def run_cpp_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+def run_cpp_solution(user_code: str, test_cases: List[Dict[str, Any]], question_id: str = "") -> Dict[str, Any]:
     # Check if g++ available
     try:
         subprocess.run(["g++.exe", "--version"], capture_output=True, check=True)
@@ -196,6 +196,63 @@ def run_cpp_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[s
     exe_file = os.path.join(temp_dir, "solution.exe")
 
     # Generate complete C++ harness that handles inputs
+    code_lower = user_code.lower()
+    if "coinchange" in code_lower or "coin" in question_id:
+        dispatch_block = """
+        vector<int> coins = parseVectorInt(line1);
+        int amount = stoi(line2);
+        int res = sol.coinChange(coins, amount);
+        cout << res << endl;
+        return 0;
+        """
+    elif "twosum" in code_lower or "two-sum" in question_id:
+        dispatch_block = """
+        vector<int> nums = parseVectorInt(line1);
+        int target = stoi(line2);
+        vector<int> res = sol.twoSum(nums, target);
+        cout << "[";
+        for (size_t i = 0; i < res.size(); i++) {
+            cout << res[i] << (i + 1 < res.size() ? ", " : "");
+        }
+        cout << "]" << endl;
+        return 0;
+        """
+    elif "lengthoflongestsubstring" in code_lower or "substring" in question_id:
+        dispatch_block = """
+        string s = stripQuotes(line1);
+        int res = sol.lengthOfLongestSubstring(s);
+        cout << res << endl;
+        return 0;
+        """
+    elif "trap" in code_lower or "rain" in question_id:
+        dispatch_block = """
+        vector<int> height = parseVectorInt(line1);
+        int res = sol.trap(height);
+        cout << res << endl;
+        return 0;
+        """
+    elif "isanagram" in code_lower or "anagram" in question_id:
+        dispatch_block = """
+        string s = stripQuotes(line1);
+        string t = stripQuotes(line2);
+        bool res = sol.isAnagram(s, t);
+        cout << (res ? "true" : "false") << endl;
+        return 0;
+        """
+    elif "findmediansortedarrays" in code_lower or "median" in question_id:
+        dispatch_block = """
+        vector<int> nums1 = parseVectorInt(line1);
+        vector<int> nums2 = parseVectorInt(line2);
+        double res = sol.findMedianSortedArrays(nums1, nums2);
+        cout << res << endl;
+        return 0;
+        """
+    else:
+        dispatch_block = """
+        cout << 0 << endl;
+        return 0;
+        """
+
     harness = f"""
 #include <iostream>
 #include <vector>
@@ -222,26 +279,20 @@ vector<int> parseVectorInt(string s) {{
     return res;
 }}
 
+string stripQuotes(string s) {{
+    if (s.length() >= 2 && s.front() == '"' && s.back() == '"') {{
+        return s.substr(1, s.length() - 2);
+    }}
+    return s;
+}}
+
 int main() {{
     string line1, line2;
     if (!getline(cin, line1)) return 0;
     getline(cin, line2);
 
     Solution sol;
-    // Two Sum check
-    if (line1.find('[') != string::npos && !line2.empty() && line2.find('[') == string::npos) {{
-        vector<int> nums = parseVectorInt(line1);
-        int target = stoi(line2);
-        vector<int> res = sol.twoSum(nums, target);
-        cout << "[";
-        for (size_t i = 0; i < res.size(); i++) {{
-            cout << res[i] << (i + 1 < res.size() ? ", " : "");
-        }}
-        cout << "]" << endl;
-        return 0;
-    }}
-    // Default output
-    return 0;
+    {dispatch_block}
 }}
 """
     with open(src_file, "w", encoding="utf-8") as f:
@@ -319,7 +370,7 @@ int main() {{
 
 # -------------------- JAVA RUNNER --------------------
 
-def run_java_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+def run_java_solution(user_code: str, test_cases: List[Dict[str, Any]], question_id: str = "") -> Dict[str, Any]:
     try:
         subprocess.run(["javac", "-version"], capture_output=True, check=True)
     except Exception:
@@ -341,27 +392,64 @@ def run_java_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[
     harness = f"""
 import java.util.*;
 import java.io.*;
+import java.lang.reflect.*;
 
 {clean_code}
 
 public class SolutionRunner {{
     public static void main(String[] args) throws Exception {{
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-        String line1 = br.readLine();
-        if (line1 == null) return;
-        String line2 = br.readLine();
+        List<String> lines = new ArrayList<>();
+        String line;
+        while ((line = br.readLine()) != null) {{
+            if (!line.trim().isEmpty()) lines.add(line.trim());
+        }}
+        if (lines.isEmpty()) return;
 
         Solution sol = new Solution();
-        if (line1.contains("[") && line2 != null && !line2.contains("[")) {{
-            String raw = line1.replace("[", "").replace("]", "").trim();
-            String[] parts = raw.split(",");
-            int[] nums = new int[parts.length];
-            for (int i = 0; i < parts.length; i++) nums[i] = Integer.parseInt(parts[i].trim());
-            int target = Integer.parseInt(line2.trim());
+        Method target = null;
+        for (Method m : Solution.class.getDeclaredMethods()) {{
+            String name = m.getName();
+            if (!name.equals("rec") && !name.equals("helper") && !name.equals("main") && !name.startsWith("$")) {{
+                target = m;
+                break;
+            }}
+        }}
+        if (target == null && Solution.class.getDeclaredMethods().length > 0) {{
+            target = Solution.class.getDeclaredMethods()[0];
+        }}
+        if (target == null) return;
+        target.setAccessible(true);
 
-            int[] res = sol.twoSum(nums, target);
-            System.out.println(Arrays.toString(res));
-            return;
+        Class<?>[] pTypes = target.getParameterTypes();
+        Object[] mArgs = new Object[pTypes.length];
+        for (int i = 0; i < pTypes.length; i++) {{
+            String s = i < lines.size() ? lines.get(i) : "";
+            Class<?> p = pTypes[i];
+            if (p == int.class || p == Integer.class) {{
+                mArgs[i] = Integer.parseInt(s.replaceAll("[^0-9-]", ""));
+            }} else if (p == String.class) {{
+                mArgs[i] = s.replaceAll("^\\"|\\"$", "");
+            }} else if (p == int[].class) {{
+                String clean = s.replace("[", "").replace("]", "").trim();
+                if (clean.isEmpty()) {{
+                    mArgs[i] = new int[0];
+                }} else {{
+                    String[] parts = clean.split(",");
+                    int[] arr = new int[parts.length];
+                    for (int j = 0; j < parts.length; j++) arr[j] = Integer.parseInt(parts[j].trim());
+                    mArgs[i] = arr;
+                }}
+            }} else if (p == boolean.class || p == Boolean.class) {{
+                mArgs[i] = Boolean.parseBoolean(s);
+            }}
+        }}
+
+        Object res = target.invoke(sol, mArgs);
+        if (res instanceof int[]) {{
+            System.out.println(Arrays.toString((int[]) res));
+        }} else {{
+            System.out.println(res);
         }}
     }}
 }}
@@ -452,9 +540,9 @@ def execute_code(language: str, code: str, question_id: str, test_cases: List[Di
     if lang == "python":
         return run_python_solution(code, test_cases)
     elif lang in ("cpp", "c++"):
-        return run_cpp_solution(code, test_cases)
+        return run_cpp_solution(code, test_cases, question_id)
     elif lang == "java":
-        return run_java_solution(code, test_cases)
+        return run_java_solution(code, test_cases, question_id)
     else:
         return {
             "language": language,

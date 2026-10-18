@@ -5,9 +5,9 @@
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc -b && vite build",
-    "electron:dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "electron:dev": "concurrently -k \"vite --host 127.0.0.1 --port 5173\" \"wait-on -l http-get://127.0.0.1:5173 && electron .\"",
     "start": "electron ."
   },
   "dependencies": {

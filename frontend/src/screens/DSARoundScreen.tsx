@@ -14,7 +14,9 @@ import {
   MicOff,
   Code2,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  SkipForward,
+  HelpCircle
 } from 'lucide-react';
 import { InterviewConfig, Question, ExecutionReport, CodeAnalysis, ChatMessage } from '../types';
 import { fetchCompanyQuestion, runCode, analyzeCode, sendInterviewChat } from '../services/api';
@@ -56,6 +58,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [userInputText, setUserInputText] = useState("");
   const [isAnalyzingApproach, setIsAnalyzingApproach] = useState(false);
   const [codeAnalysis, setCodeAnalysis] = useState<CodeAnalysis | null>(null);
+  const [showSkipModal, setShowSkipModal] = useState(false);
 
   const speechRecognitionRef = useRef<any>(null);
 
@@ -220,7 +223,29 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
     ]);
   };
 
-  // 4. Run Code (Visible cases only)
+  // 4. Request Hint from AI
+  const handleRequestHint = async () => {
+    if (!question) return;
+    addMessage("user", "I'm a bit stuck on this problem. Could you provide a small hint or nudge in the right direction?");
+    setAiStatus('thinking');
+    setAiCaption("AI interviewer is formulating a helpful hint...");
+
+    const reply = await sendInterviewChat(
+      'dsa_1',
+      config.company,
+      config.role,
+      [...chatMessages, { id: 'usr-hint', role: 'user', content: `Candidate is stuck on problem: ${question.title}. Give a concise, 1-2 sentence algorithmic hint or suggest what data structure or edge case to look into, without writing out the complete code.`, timestamp: '' }],
+      config.resume_text,
+      config.additional_context,
+      config.provider,
+      config.api_key
+    );
+
+    addMessage("assistant", reply);
+    speakText(reply);
+  };
+
+  // 5. Run Code (Visible cases only)
   const handleRunCode = async () => {
     if (!question) return;
     setIsExecuting(true);
@@ -312,16 +337,29 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
             <span>{formatTimer(secondsLeft)}</span>
           </div>
 
+          {/* Hint Button */}
           <button
-            onClick={onSkip}
-            className="text-xs text-gray-500 hover:text-gray-800 underline px-2 py-1"
+            onClick={handleRequestHint}
+            className="text-xs bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-pill flex items-center gap-1 font-medium transition-colors cursor-pointer"
+            title="Ask AI interviewer for a subtle hint"
           >
-            Skip Round
+            <HelpCircle className="w-3.5 h-3.5 text-amber-600" />
+            <span>Hint</span>
+          </button>
+
+          {/* Prominent Skip Button */}
+          <button
+            onClick={() => setShowSkipModal(true)}
+            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 px-3 py-1.5 rounded-pill flex items-center gap-1 font-medium transition-colors cursor-pointer"
+            title="Unable to answer or want to skip this round"
+          >
+            <SkipForward className="w-3.5 h-3.5 text-gray-500" />
+            <span>Skip Round</span>
           </button>
 
           <button
             onClick={handleNextRound}
-            className="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5 shadow-sm"
+            className="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5 shadow-sm cursor-pointer"
           >
             <span>Proceed to Next Round</span>
             <ChevronRight className="w-3.5 h-3.5" />
@@ -584,6 +622,48 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           />
         </div>
       </div>
+
+      {/* Skip Round Confirmation Modal */}
+      {showSkipModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="w-12 h-12 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mx-auto">
+              <SkipForward className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Skip {roundName}?
+              </h3>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Unable to answer or want to move ahead? You can skip this coding problem directly and advance to the next interview round.
+              </p>
+              <p className="text-[11px] text-gray-400">
+                (Note: Unfinished rounds are excluded from final scoring, so this will not penalize other rounds.)
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setShowSkipModal(false);
+                  onSkip();
+                }}
+                className="w-full btn-primary text-xs py-2.5 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Yes, Skip Round & Advance</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={() => setShowSkipModal(false)}
+                className="w-full btn-secondary text-xs py-2.5 cursor-pointer"
+              >
+                Continue Working on Problem
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Candidate Live Webcam PiP */}
       <CameraFeed isPiP={true} />

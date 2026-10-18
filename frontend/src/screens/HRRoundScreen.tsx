@@ -8,7 +8,8 @@ import {
   Bot,
   User,
   Sparkles,
-  Award
+  Award,
+  SkipForward
 } from 'lucide-react';
 import { InterviewConfig, ChatMessage } from '../types';
 import { sendInterviewChat } from '../services/api';
@@ -200,14 +201,16 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
 
           <button
             onClick={onSkip}
-            className="text-xs text-gray-500 hover:text-gray-800 underline px-2 py-1"
+            className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 px-3 py-1.5 rounded-pill flex items-center gap-1 font-medium transition-colors cursor-pointer"
+            title="Skip this HR round and proceed to assessment"
           >
-            Skip Round
+            <SkipForward className="w-3.5 h-3.5 text-gray-500" />
+            <span>Skip Round</span>
           </button>
 
           <button
             onClick={() => onComplete(chatMessages)}
-            className="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5 bg-brand-green hover:bg-[#009b4d]"
+            className="btn-primary text-xs px-4 py-1.5 flex items-center gap-1.5 bg-brand-green hover:bg-[#009b4d] cursor-pointer"
           >
             <Award className="w-3.5 h-3.5" />
             <span>Finish & View Assessment</span>
@@ -237,32 +240,47 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
             </div>
 
             {/* Mic / Type input */}
-            <div className="flex items-center gap-2 w-full">
-              <button
-                onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
-                className={`px-4 py-2 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all ${
-                  isListeningMic
-                    ? "bg-red-500 text-white animate-pulse"
-                    : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm"
-                }`}
-              >
-                {isListeningMic ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4 text-gray-400" />}
-                <span>{isListeningMic ? "Mic Active..." : "Push to Speak"}</span>
-              </button>
+            <div className="space-y-2 w-full">
+              <div className="flex items-center gap-2 w-full">
+                <button
+                  onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
+                  className={`px-4 py-2 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all ${
+                    isListeningMic
+                      ? "bg-red-500 text-white animate-pulse"
+                      : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm"
+                  }`}
+                >
+                  {isListeningMic ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4 text-gray-400" />}
+                  <span>{isListeningMic ? "Mic Active..." : "Push to Speak"}</span>
+                </button>
 
-              <input
-                type="text"
-                value={typedInput}
-                onChange={(e) => setTypedInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && typedInput.trim()) {
-                    handleUserResponse(typedInput);
-                    setTypedInput("");
-                  }
-                }}
-                placeholder="Or type behavioral response..."
-                className="flex-1 px-4 py-2 rounded-pill border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-green/30 bg-white"
-              />
+                <input
+                  type="text"
+                  value={typedInput}
+                  onChange={(e) => setTypedInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && typedInput.trim()) {
+                      handleUserResponse(typedInput);
+                      setTypedInput("");
+                    }
+                  }}
+                  placeholder="Or type behavioral response..."
+                  className="flex-1 px-4 py-2 rounded-pill border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-green/30 bg-white"
+                />
+              </div>
+
+              {/* Quick Skip Question Button */}
+              <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
+                <span>Want a different behavioral scenario?</span>
+                <button
+                  type="button"
+                  onClick={() => handleUserResponse("I don't have a good example for this situation right now. Could we please skip to a different behavioral question?")}
+                  className="text-brand-green hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                >
+                  <SkipForward className="w-3 h-3" />
+                  <span>Skip Question & Ask Another</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

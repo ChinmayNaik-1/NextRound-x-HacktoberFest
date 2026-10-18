@@ -3,6 +3,52 @@ import os
 import requests
 from typing import Dict, Any, List, Optional
 
+def resolve_gemini_model(api_key: str) -> Optional[str]:
+    """Dynamically queries Google AI Studio to discover the supported generateContent model for this key."""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        
+        # 1. Try listing models from Google API
+        try:
+            available = []
+            for m in genai.list_models():
+                methods = getattr(m, "supported_generation_methods", [])
+                if "generateContent" in methods:
+                    available.append(m.name)
+            if available:
+                # Prioritize flash or pro models
+                for pref in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-pro", "gemini-1.5-pro"]:
+                    for name in available:
+                        if pref in name:
+                            return name.replace("models/", "")
+                return available[0].replace("models/", "")
+        except Exception:
+            pass
+
+        # 2. Try candidate list fallback
+        candidates = [
+            "gemini-1.5-flash-latest",
+            "gemini-2.0-flash-exp",
+            "gemini-2.0-flash",
+            "gemini-pro",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "models/gemini-1.5-flash",
+            "models/gemini-pro"
+        ]
+        for c in candidates:
+            try:
+                m = genai.GenerativeModel(c)
+                resp = m.generate_content("ping")
+                if resp and resp.text:
+                    return c
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
 def verify_provider_api_key(provider: str, api_key: str) -> Dict[str, Any]:
     prov = (provider or "gemini").lower().strip()
     key = (api_key or "").strip()
@@ -13,12 +59,17 @@ def verify_provider_api_key(provider: str, api_key: str) -> Dict[str, Any]:
         try:
             import google.generativeai as genai
             genai.configure(api_key=key)
-            # Test model list or tiny prompt
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            resp = model.generate_content("Ping")
-            if resp and resp.text:
-                return {"valid": True, "message": "Successfully verified Google Gemini API Key!"}
-            return {"valid": False, "message": "No response returned from Gemini."}
+            working_model = resolve_gemini_model(key)
+            if working_model:
+                return {
+                    "valid": True,
+                    "message": f"Successfully verified Google Gemini API Key! Active Model: {working_model}",
+                    "model": working_model
+                }
+            return {
+                "valid": False,
+                "message": "Gemini key rejected: No available model found supporting generateContent. Please ensure the key has Gemini API access enabled in Google AI Studio."
+            }
         except Exception as e:
             return {"valid": False, "message": f"Gemini Verification Error: {str(e)}"}
             
@@ -80,7 +131,7 @@ class AIAgent:
     def __init__(self, provider: str = "gemini", api_key: Optional[str] = None, model: Optional[str] = None):
         self.provider = (provider or "gemini").lower()
         self.api_key = api_key
-        self.model = model or ("gemini-1.5-flash" if self.provider == "gemini" else "default")
+        self.model = model
 
     def _call_gemini(self, prompt: str, system_prompt: str = "") -> str:
         if not self.api_key:
@@ -88,16 +139,27 @@ class AIAgent:
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            model_name = "gemini-1.5-flash"
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                system_instruction=system_prompt if system_prompt else None
-            )
-            response = model.generate_content(prompt)
-            return response.text
+            
+            # Resolve or use candidate models
+            model_to_use = self.model or resolve_gemini_model(self.api_key) or "gemini-1.5-flash-latest"
+            candidates = [model_to_use, "gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-pro", "gemini-1.5-flash"]
+            
+            for m_name in dict.fromkeys(candidates):
+                try:
+                    model = genai.GenerativeModel(
+                        model_name=m_name,
+                        system_instruction=system_prompt if system_prompt else None
+                    )
+                    response = model.generate_content(prompt)
+                    if response and response.text:
+                        self.model = m_name
+                        return response.text
+                except Exception as ex:
+                    print(f"[Gemini Try {m_name} Error]: {ex}")
+                    continue
         except Exception as e:
-            print(f"[Gemini Error]: {e}")
-            return ""
+            print(f"[Gemini General Error]: {e}")
+        return ""
 
     def _call_openai(self, prompt: str, system_prompt: str = "") -> str:
         if not self.api_key:
