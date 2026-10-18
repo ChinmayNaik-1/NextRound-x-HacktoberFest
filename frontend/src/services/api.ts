@@ -6,10 +6,16 @@ import {
   InterviewConfig,
   RoundType,
   NamedKey,
-  PastInterview
+  PastInterview,
+  SavedResume,
+  SavedCredentials
 } from '../types';
 
 const API_BASE = "http://127.0.0.1:8000/api";
+
+const KEYS_CACHE_KEY = "nextround_cached_keys";
+const RESUMES_CACHE_KEY = "nextround_cached_resumes";
+const CREDS_CACHE_KEY = "nextround_cached_credentials";
 
 export async function checkBackendHealth(): Promise<boolean> {
   try {
@@ -22,14 +28,32 @@ export async function checkBackendHealth(): Promise<boolean> {
 
 // ---------------- Named API Keys ----------------
 
+export function getCachedKeys(): { keys: NamedKey[]; active_key_id: string | null } {
+  try {
+    const raw = localStorage.getItem(KEYS_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { keys: [], active_key_id: null };
+}
+
+export function setCachedKeys(data: { keys: NamedKey[]; active_key_id: string | null }) {
+  try {
+    localStorage.setItem(KEYS_CACHE_KEY, JSON.stringify(data));
+  } catch {}
+}
+
 export async function fetchNamedKeys(): Promise<{ keys: NamedKey[]; active_key_id: string | null }> {
   try {
     const res = await fetch(`${API_BASE}/keys`);
-    if (res.ok) return await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      setCachedKeys(data);
+      return data;
+    }
   } catch (e) {
-    console.error("fetchNamedKeys error", e);
+    console.warn("fetchNamedKeys failed, falling back to cache", e);
   }
-  return { keys: [], active_key_id: null };
+  return getCachedKeys();
 }
 
 export async function addNamedKey(
@@ -47,7 +71,10 @@ export async function addNamedKey(
     const err = await res.json().catch(() => ({ detail: "Failed to add API key" }));
     throw new Error(err.detail || "Failed to add key");
   }
-  return await res.json();
+  const result = await res.json();
+  // Refresh cache
+  fetchNamedKeys().catch(() => {});
+  return result;
 }
 
 export async function verifyApiKey(provider: string, api_key: string): Promise<{ valid: boolean; message: string }> {
@@ -67,19 +94,169 @@ export async function verifyApiKey(provider: string, api_key: string): Promise<{
 export async function activateNamedKey(key_id: string): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/keys/${key_id}/activate`, { method: "POST" });
-    return res.ok;
-  } catch {
-    return false;
-  }
+    if (res.ok) {
+      const cached = getCachedKeys();
+      cached.active_key_id = key_id;
+      cached.keys.forEach((k) => {
+        k.is_active = k.id === key_id;
+      });
+      setCachedKeys(cached);
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 export async function deleteNamedKey(key_id: string): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/keys/${key_id}`, { method: "DELETE" });
-    return res.ok;
-  } catch {
-    return false;
+    if (res.ok) {
+      const cached = getCachedKeys();
+      cached.keys = cached.keys.filter((k) => k.id !== key_id);
+      if (cached.active_key_id === key_id) {
+        cached.active_key_id = cached.keys[0]?.id || null;
+      }
+      setCachedKeys(cached);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+// ---------------- Resumes Management ----------------
+
+export function getCachedResumes(): { resumes: SavedResume[]; active_resume_id: string | null } {
+  try {
+    const raw = localStorage.getItem(RESUMES_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { resumes: [], active_resume_id: null };
+}
+
+export function setCachedResumes(data: { resumes: SavedResume[]; active_resume_id: string | null }) {
+  try {
+    localStorage.setItem(RESUMES_CACHE_KEY, JSON.stringify(data));
+  } catch {}
+}
+
+export async function fetchResumes(): Promise<{ resumes: SavedResume[]; active_resume_id: string | null }> {
+  try {
+    const res = await fetch(`${API_BASE}/resumes`);
+    if (res.ok) {
+      const data = await res.json();
+      setCachedResumes(data);
+      return data;
+    }
+  } catch (e) {
+    console.warn("fetchResumes failed, falling back to cache", e);
   }
+  return getCachedResumes();
+}
+
+export async function addSavedResume(
+  title: string,
+  raw_text: string,
+  candidate_name: string = "",
+  file_name: string = "",
+  detected_skills: string[] = []
+): Promise<{ status: string; resume: SavedResume; message?: string }> {
+  const res = await fetch(`${API_BASE}/resumes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title,
+      raw_text,
+      candidate_name,
+      file_name,
+      detected_skills,
+      make_active: true
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed to save resume" }));
+    throw new Error(err.detail || "Failed to save resume");
+  }
+  const result = await res.json();
+  fetchResumes().catch(() => {});
+  return result;
+}
+
+export async function activateSavedResume(resume_id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/resumes/${resume_id}/activate`, { method: "POST" });
+    if (res.ok) {
+      const cached = getCachedResumes();
+      cached.active_resume_id = resume_id;
+      cached.resumes.forEach((r) => {
+        r.is_active = r.id === resume_id;
+      });
+      setCachedResumes(cached);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+export async function deleteSavedResume(resume_id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/resumes/${resume_id}`, { method: "DELETE" });
+    if (res.ok) {
+      const cached = getCachedResumes();
+      cached.resumes = cached.resumes.filter((r) => r.id !== resume_id);
+      if (cached.active_resume_id === resume_id) {
+        cached.active_resume_id = cached.resumes[0]?.id || null;
+      }
+      setCachedResumes(cached);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+// ---------------- Candidate Credentials Persistence ----------------
+
+export function getCachedCredentials(): SavedCredentials {
+  try {
+    const raw = localStorage.getItem(CREDS_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {
+    candidate_name: "Alex",
+    company: "Google",
+    role: "Software Engineer (SDE I/II)",
+    difficulty: "Medium",
+    selected_rounds: ["dsa_1", "technical", "hr"],
+    additional_context: "Maintain a realistic technical bar. Ask probing follow-ups on performance bottlenecks and edge cases."
+  };
+}
+
+export function setCachedCredentials(creds: SavedCredentials) {
+  try {
+    localStorage.setItem(CREDS_CACHE_KEY, JSON.stringify(creds));
+  } catch {}
+}
+
+export async function fetchCredentials(): Promise<SavedCredentials> {
+  try {
+    const res = await fetch(`${API_BASE}/credentials`);
+    if (res.ok) {
+      const data = await res.json();
+      setCachedCredentials(data);
+      return data;
+    }
+  } catch {}
+  return getCachedCredentials();
+}
+
+export async function saveCredentialsApi(creds: SavedCredentials): Promise<void> {
+  setCachedCredentials(creds);
+  try {
+    await fetch(`${API_BASE}/credentials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(creds)
+    });
+  } catch {}
 }
 
 // ---------------- Interview History ----------------

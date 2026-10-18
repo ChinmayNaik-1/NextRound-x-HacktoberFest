@@ -117,3 +117,24 @@ export interface FinalReport {
     type: string;
   }>;
 }
+
+export interface SavedResume {
+  id: string;
+  title: string;
+  candidate_name: string;
+  file_name: string;
+  raw_text: string;
+  detected_skills: string[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface SavedCredentials {
+  candidate_name: string;
+  dob?: string;
+  company: string;
+  role: string;
+  difficulty: 'Easy' | 'Medium' | 'Hard' | 'Brutal';
+  selected_rounds: RoundType[];
+  additional_context: string;
+}

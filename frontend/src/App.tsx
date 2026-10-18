@@ -168,7 +168,6 @@ export function App() {
   };
 
   const handleRestart = () => {
-    setConfig(null);
     setAllTranscripts([]);
     setRoundSubmissions([]);
     setCompletedRounds([]);

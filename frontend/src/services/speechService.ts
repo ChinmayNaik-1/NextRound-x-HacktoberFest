@@ -45,6 +45,52 @@ export class SpeechService {
     });
   }
 
+  // Play an instant pleasant confirmation chime via Web Audio API
+  public static playChime(): Promise<void> {
+    return new Promise((resolve) => {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) {
+          resolve();
+          return;
+        }
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+
+        // Note 1: C5 (523.25 Hz)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(523.25, now);
+        gain1.gain.setValueAtTime(0.15, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.35);
+
+        // Note 2: E5 (659.25 Hz) slightly delayed
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(659.25, now + 0.12);
+        gain2.gain.setValueAtTime(0.18, now + 0.12);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.12);
+        osc2.stop(now + 0.55);
+
+        setTimeout(() => {
+          ctx.close().catch(() => {});
+          resolve();
+        }, 600);
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   // 1. Text-to-Speech (TTS)
   public static speak(
     text: string,
@@ -65,9 +111,28 @@ export class SpeechService {
       return;
     }
 
+    // Chromium Bugfix: Unfreeze paused synth if desynced
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
+
+    // Pick best voice on the fly if not yet cached
+    if (!SpeechService.selectedVoice) {
+      const voices = window.speechSynthesis.getVoices();
+      SpeechService.selectedVoice = voices.find(
+        (v) =>
+          v.lang.startsWith('en') &&
+          (v.name.includes('Natural') ||
+            v.name.includes('Google') ||
+            v.name.includes('Jenny') ||
+            v.name.includes('David') ||
+            v.name.includes('Samantha'))
+      ) || voices.find((v) => v.lang.startsWith('en')) || null;
+    }
 
     if (SpeechService.selectedVoice) {
       utterance.voice = SpeechService.selectedVoice;
@@ -82,14 +147,19 @@ export class SpeechService {
     };
 
     utterance.onerror = (e) => {
-      // Ignore canceled error if caused by explicit stop/interruption
       if (e.error !== 'canceled' && onError) {
         onError(e);
       }
       if (onEnd) onEnd();
     };
 
-    window.speechSynthesis.speak(utterance);
+    // Chromium Bugfix: Small 60ms delay allows Chromium's audio stream pipeline to unfreeze after cancel()
+    setTimeout(() => {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      window.speechSynthesis.speak(utterance);
+    }, 60);
   }
 
   // Interrupt AI immediately

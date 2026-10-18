@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Building2,
   FileText,
@@ -7,10 +7,26 @@ import {
   Upload,
   Layers,
   Clock,
-  ArrowLeft
+  ArrowLeft,
+  Bookmark,
+  Check,
+  Trash2,
+  Sparkles,
+  Plus
 } from 'lucide-react';
-import { InterviewConfig, RoundType, NamedKey } from '../types';
-import { parseResumePdf, parseResumeText } from '../services/api';
+import { InterviewConfig, RoundType, NamedKey, SavedResume } from '../types';
+import {
+  parseResumePdf,
+  parseResumeText,
+  fetchResumes,
+  addSavedResume,
+  activateSavedResume,
+  deleteSavedResume,
+  getCachedResumes,
+  getCachedCredentials,
+  fetchCredentials,
+  saveCredentialsApi
+} from '../services/api';
 import { ParticleCanvas } from '../components/ParticleCanvas';
 import { PermissionsCheckModal } from './PermissionsCheckModal';
 
@@ -35,37 +51,156 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
   onBackToLanding,
   onStart
 }) => {
-  const [candidateName, setCandidateName] = useState("Alex");
-  const [dob, setDob] = useState("");
-  const [company, setCompany] = useState("Google");
-  const [role, setRole] = useState("Software Engineer (SDE I/II)");
-  const [difficulty, setDifficulty] = useState<'Easy' | 'Medium' | 'Hard' | 'Brutal'>('Medium');
+  const cachedCreds = getCachedCredentials();
+  const [candidateName, setCandidateName] = useState(cachedCreds.candidate_name || "Alex");
+  const [dob, setDob] = useState(cachedCreds.dob || "");
+  const [company, setCompany] = useState(cachedCreds.company || "Google");
+  const [role, setRole] = useState(cachedCreds.role || "Software Engineer (SDE I/II)");
+  const [difficulty, setDifficulty] = useState<'Easy' | 'Medium' | 'Hard' | 'Brutal'>(cachedCreds.difficulty || 'Medium');
   
   // Rounds Selection
-  const [selectedRounds, setSelectedRounds] = useState<RoundType[]>([
-    'dsa_1',
-    'technical',
-    'hr'
-  ]);
+  const [selectedRounds, setSelectedRounds] = useState<RoundType[]>(
+    cachedCreds.selected_rounds && cachedCreds.selected_rounds.length > 0
+      ? cachedCreds.selected_rounds
+      : ['dsa_1', 'technical', 'hr']
+  );
   
-  // Resume
+  // Resumes list & selection
+  const [savedResumes, setSavedResumes] = useState<SavedResume[]>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState<string>("new");
+  const [newResumeTitle, setNewResumeTitle] = useState("");
   const [resumeText, setResumeText] = useState("");
   const [detectedSkills, setDetectedSkills] = useState<string[]>([]);
   const [isParsingResume, setIsParsingResume] = useState(false);
   const [resumeFileName, setResumeFileName] = useState("");
+  const [isSavingResume, setIsSavingResume] = useState(false);
 
   // Additional instructions
   const [additionalContext, setAdditionalContext] = useState(
+    cachedCreds.additional_context ||
     "Maintain a realistic technical bar. Ask probing follow-ups on performance bottlenecks and edge cases."
   );
 
   // Hardware permission modal state
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
 
+  // Load Credentials & Saved Resumes on mount
+  useEffect(() => {
+    fetchCredentials().then((creds) => {
+      if (creds) {
+        if (creds.candidate_name) setCandidateName(creds.candidate_name);
+        if (creds.dob) setDob(creds.dob);
+        if (creds.company) setCompany(creds.company);
+        if (creds.role) setRole(creds.role);
+        if (creds.difficulty) setDifficulty(creds.difficulty);
+        if (creds.selected_rounds && creds.selected_rounds.length > 0) {
+          setSelectedRounds(creds.selected_rounds);
+        }
+        if (creds.additional_context) setAdditionalContext(creds.additional_context);
+      }
+    });
+
+    // Load cached resumes first
+    const cachedR = getCachedResumes();
+    if (cachedR.resumes.length > 0) {
+      setSavedResumes(cachedR.resumes);
+      const active = cachedR.resumes.find((r) => r.is_active) || cachedR.resumes[0];
+      if (active) {
+        setSelectedResumeId(active.id);
+        setResumeText(active.raw_text);
+        setDetectedSkills(active.detected_skills || []);
+        setResumeFileName(active.file_name || active.title);
+        if (active.candidate_name && active.candidate_name !== "Alex") {
+          setCandidateName(active.candidate_name);
+        }
+      }
+    }
+
+    // Refresh from backend
+    fetchResumes().then((res) => {
+      setSavedResumes(res.resumes);
+      if (res.resumes.length > 0) {
+        const active = res.resumes.find((r) => r.id === res.active_resume_id) || res.resumes[0];
+        setSelectedResumeId(active.id);
+        setResumeText(active.raw_text);
+        setDetectedSkills(active.detected_skills || []);
+        setResumeFileName(active.file_name || active.title);
+        if (active.candidate_name && active.candidate_name !== "Alex") {
+          setCandidateName(active.candidate_name);
+        }
+      }
+    });
+  }, []);
+
+  const handleSelectResume = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    setSelectedResumeId(id);
+    if (id === "new") {
+      setResumeText("");
+      setDetectedSkills([]);
+      setResumeFileName("");
+      setNewResumeTitle("");
+      return;
+    }
+    const found = savedResumes.find((r) => r.id === id);
+    if (found) {
+      setResumeText(found.raw_text);
+      setDetectedSkills(found.detected_skills || []);
+      setResumeFileName(found.file_name || found.title);
+      if (found.candidate_name) {
+        setCandidateName(found.candidate_name);
+      }
+      await activateSavedResume(found.id);
+    }
+  };
+
+  const handleSaveCurrentResume = async () => {
+    if (!resumeText.trim()) {
+      alert("Please upload or paste a resume first before saving.");
+      return;
+    }
+    const title = newResumeTitle.trim() || resumeFileName || `${candidateName}'s Resume`;
+    setIsSavingResume(true);
+    try {
+      const res = await addSavedResume(title, resumeText, candidateName, resumeFileName, detectedSkills);
+      const updated = await fetchResumes();
+      setSavedResumes(updated.resumes);
+      setSelectedResumeId(res.resume.id);
+      setNewResumeTitle("");
+      alert(`Resume "${title}" saved successfully to your local profiles!`);
+    } catch (err: any) {
+      alert(err.message || "Failed to save resume");
+    } finally {
+      setIsSavingResume(false);
+    }
+  };
+
+  const handleDeleteResume = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm("Delete this saved resume profile?")) {
+      await deleteSavedResume(id);
+      const updated = await fetchResumes();
+      setSavedResumes(updated.resumes);
+      if (updated.resumes.length > 0) {
+        const next = updated.resumes[0];
+        setSelectedResumeId(next.id);
+        setResumeText(next.raw_text);
+        setDetectedSkills(next.detected_skills || []);
+        setResumeFileName(next.file_name || next.title);
+      } else {
+        setSelectedResumeId("new");
+        setResumeText("");
+        setDetectedSkills([]);
+        setResumeFileName("");
+      }
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setResumeFileName(file.name);
+    setNewResumeTitle(file.name.replace(/\.[^/.]+$/, ""));
     setIsParsingResume(true);
     try {
       if (file.type === "application/pdf") {
@@ -96,6 +231,16 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Persist credentials
+    saveCredentialsApi({
+      candidate_name: candidateName,
+      dob,
+      company,
+      role,
+      difficulty,
+      selected_rounds: selectedRounds,
+      additional_context: additionalContext
+    });
     setShowPermissionsModal(true);
   };
 
@@ -357,52 +502,124 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
 
           <hr className="border-gray-100" />
 
-          {/* Section 3: Resume Parser */}
+          {/* Section 3: Resume Profiles & Parser */}
           <div className="space-y-3">
-            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-brand-purple" />
-              3. Candidate Resume (PDF or Plain Text)
-            </h2>
-
-            <div className="flex flex-col md:flex-row gap-3">
-              <label className="flex-1 border-2 border-dashed border-gray-300 hover:border-brand-blue rounded-xl p-5 text-center cursor-pointer transition-colors bg-[#FAFAFA] flex flex-col items-center justify-center">
-                <Upload className="w-6 h-6 text-gray-400 mb-1" />
-                <span className="text-xs font-semibold text-gray-700">
-                  {resumeFileName || "Upload Resume (PDF / TXT)"}
-                </span>
-                <span className="text-[10px] text-gray-400 mt-0.5">Click or drag & drop</span>
-                <input
-                  type="file"
-                  accept=".pdf,.txt"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </label>
-
-              <div className="flex-1">
-                <textarea
-                  value={resumeText}
-                  onChange={(e) => setResumeText(e.target.value)}
-                  placeholder="Or paste resume text here (projects, skills, experience)..."
-                  rows={3}
-                  className="w-full p-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 text-xs font-mono text-gray-700 leading-relaxed"
-                />
-              </div>
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-brand-purple" />
+                3. Candidate Resume & Saved Profiles
+              </h2>
+              <span className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-3 py-1 rounded-pill font-mono">
+                {savedResumes.length} Saved {savedResumes.length === 1 ? 'Profile' : 'Profiles'}
+              </span>
             </div>
 
-            {detectedSkills.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 items-center pt-1">
-                <span className="text-[11px] text-gray-500 font-medium">Parsed Skills:</span>
-                {detectedSkills.map((sk) => (
-                  <span
-                    key={sk}
-                    className="text-[10px] bg-blue-50 text-brand-blue border border-blue-200 px-2 py-0.5 rounded-pill font-medium"
-                  >
-                    {sk}
+            {/* Resume Selection Dropdown */}
+            <div className="bg-[#F8F9FA] p-3.5 rounded-xl border border-gray-200 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-800">
+                    Select Resume Profile
+                  </label>
+                  <span className="text-[11px] text-gray-500">
+                    Choose from previously saved resumes or upload a new one
                   </span>
-                ))}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedResumeId}
+                    onChange={handleSelectResume}
+                    className="px-3 py-1.5 bg-white rounded-lg border border-gray-300 text-xs font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 shadow-sm cursor-pointer"
+                  >
+                    <option value="new">+ Upload / Paste New Resume</option>
+                    {savedResumes.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.title} {r.candidate_name ? `(${r.candidate_name})` : ''}
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedResumeId !== 'new' && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteResume(selectedResumeId, e)}
+                      className="text-xs text-red-500 hover:text-red-700 p-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 transition-colors cursor-pointer"
+                      title="Delete this saved resume"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
+
+              {/* Upload Dropzone & Text Area */}
+              <div className="flex flex-col md:flex-row gap-3 pt-1">
+                <label className="flex-1 border-2 border-dashed border-gray-300 hover:border-brand-blue rounded-xl p-5 text-center cursor-pointer transition-colors bg-white flex flex-col items-center justify-center">
+                  <Upload className="w-6 h-6 text-gray-400 mb-1" />
+                  <span className="text-xs font-semibold text-gray-700">
+                    {resumeFileName || (selectedResumeId === 'new' ? "Upload Resume (PDF / TXT)" : "Replace with new file")}
+                  </span>
+                  <span className="text-[10px] text-gray-400 mt-0.5">Click or drag & drop</span>
+                  <input
+                    type="file"
+                    accept=".pdf,.txt"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                <div className="flex-1">
+                  <textarea
+                    value={resumeText}
+                    onChange={(e) => setResumeText(e.target.value)}
+                    placeholder="Or paste resume text here (projects, skills, experience)..."
+                    rows={3}
+                    className="w-full p-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 text-xs font-mono text-gray-700 leading-relaxed bg-white"
+                  />
+                </div>
+              </div>
+
+              {/* Save Resume Profile Bar (When new resume text is present) */}
+              {selectedResumeId === 'new' && resumeText.trim().length > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-gray-200">
+                  <div className="flex items-center gap-2 flex-1 w-full">
+                    <Bookmark className="w-4 h-4 text-brand-purple shrink-0" />
+                    <input
+                      type="text"
+                      value={newResumeTitle}
+                      onChange={(e) => setNewResumeTitle(e.target.value)}
+                      placeholder="Name this resume profile (e.g. SDE II Google Resume)..."
+                      className="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs flex-1 focus:outline-none focus:ring-2 focus:ring-brand-purple/30"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveCurrentResume}
+                    disabled={isSavingResume}
+                    className="px-4 py-1.5 bg-brand-purple hover:bg-purple-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isSavingResume ? "Saving..." : "Save Resume Profile"}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Detected Skills Pills */}
+              {detectedSkills.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 items-center pt-1">
+                  <span className="text-[11px] text-gray-500 font-medium">Parsed Skills:</span>
+                  {detectedSkills.map((sk) => (
+                    <span
+                      key={sk}
+                      className="text-[10px] bg-purple-50 text-brand-purple border border-purple-200 px-2 py-0.5 rounded-pill font-medium"
+                    >
+                      {sk}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <hr className="border-gray-100" />

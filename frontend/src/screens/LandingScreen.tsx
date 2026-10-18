@@ -13,11 +13,13 @@ import {
   ShieldCheck,
   Cpu,
   Layers,
-  ArrowRight
+  ArrowRight,
+  RefreshCw
 } from 'lucide-react';
 import { NamedKey, PastInterview } from '../types';
 import {
   fetchNamedKeys,
+  getCachedKeys,
   addNamedKey,
   verifyApiKey,
   deleteNamedKey,
@@ -49,10 +51,46 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   const [pastInterviews, setPastInterviews] = useState<PastInterview[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
 
-  // Load Named Keys & Past Interviews on mount
+  // Load Named Keys & Past Interviews on mount with cold-start retry
   useEffect(() => {
-    loadData();
+    // 1. Instant cache load
+    const cached = getCachedKeys();
+    if (cached.keys.length > 0) {
+      setKeys(cached.keys);
+      const active = cached.keys.find((k) => k.is_active) || cached.keys[0];
+      setSelectedKeyId(active.id);
+    }
+
+    // 2. Network load with retry
+    let isMounted = true;
+    let attempts = 0;
+    const syncKeys = async () => {
+      const keysData = await fetchNamedKeys();
+      if (!isMounted) return;
+      if (keysData.keys.length > 0) {
+        setKeys(keysData.keys);
+        const active = keysData.keys.find((k) => k.is_active) || keysData.keys[0];
+        setSelectedKeyId(active.id);
+      } else if (attempts < 5) {
+        attempts++;
+        setTimeout(syncKeys, 1000);
+      }
+    };
+    syncKeys();
+
+    loadHistory();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  const loadHistory = async () => {
+    setIsLoadingHistory(true);
+    const historyData = await fetchInterviewHistory();
+    setPastInterviews(historyData);
+    setIsLoadingHistory(false);
+  };
 
   const loadData = async () => {
     const keysData = await fetchNamedKeys();
@@ -61,11 +99,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
       const active = keysData.keys.find((k) => k.is_active) || keysData.keys[0];
       setSelectedKeyId(active.id);
     }
-
-    setIsLoadingHistory(true);
-    const historyData = await fetchInterviewHistory();
-    setPastInterviews(historyData);
-    setIsLoadingHistory(false);
+    loadHistory();
   };
 
   const handleVerify = async () => {
@@ -238,9 +272,20 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
 
           {/* List of Saved Named Keys */}
           <div>
-            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
-              Select Active Key for Interview ({keys.length} Saved)
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Select Active Key for Interview ({keys.length} Saved)
+              </label>
+              <button
+                type="button"
+                onClick={loadData}
+                className="text-[11px] text-gray-500 hover:text-brand-blue flex items-center gap-1 cursor-pointer transition-colors"
+                title="Refresh keys from local DB"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Sync Keys</span>
+              </button>
+            </div>
 
             {keys.length > 0 ? (
               <div className="space-y-2">

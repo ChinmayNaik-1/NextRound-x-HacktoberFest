@@ -9,7 +9,9 @@ from pydantic import BaseModel
 from services.db import (
     init_db, add_api_key, list_api_keys, get_api_key_by_id,
     set_active_api_key, get_active_api_key, delete_api_key,
-    save_interview, get_interview, list_past_interviews
+    save_interview, get_interview, list_past_interviews,
+    add_resume, list_resumes, get_active_resume, set_active_resume, delete_resume,
+    save_setting, get_setting
 )
 from services.question_bank import get_question_for_company, QUESTIONS_DB
 from services.code_runner import execute_code
@@ -149,6 +151,82 @@ class TextResumeRequest(BaseModel):
 @app.post("/api/resume/parse-text")
 def parse_resume_text(req: TextResumeRequest):
     return summarize_resume(req.text)
+
+# ==================== Resumes Management Endpoints ====================
+
+class AddResumeRequest(BaseModel):
+    title: str
+    raw_text: str
+    candidate_name: Optional[str] = ""
+    file_name: Optional[str] = ""
+    detected_skills: Optional[List[str]] = []
+    make_active: Optional[bool] = True
+
+@app.get("/api/resumes")
+def get_all_resumes():
+    resumes = list_resumes()
+    active = get_active_resume()
+    return {"resumes": resumes, "active_resume_id": active["id"] if active else None}
+
+@app.post("/api/resumes")
+def create_resume_endpoint(req: AddResumeRequest):
+    if not req.title.strip():
+        raise HTTPException(status_code=400, detail="Resume title is required.")
+    if not req.raw_text.strip():
+        raise HTTPException(status_code=400, detail="Resume content is required.")
+        
+    resume_record = add_resume(
+        title=req.title,
+        raw_text=req.raw_text,
+        candidate_name=req.candidate_name,
+        file_name=req.file_name,
+        detected_skills=req.detected_skills,
+        make_active=req.make_active
+    )
+    return {"status": "success", "resume": resume_record, "message": f"Resume '{req.title}' saved."}
+
+@app.post("/api/resumes/{resume_id}/activate")
+def activate_resume_endpoint(resume_id: str):
+    ok = set_active_resume(resume_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return {"status": "success", "message": "Resume activated."}
+
+@app.delete("/api/resumes/{resume_id}")
+def remove_resume_endpoint(resume_id: str):
+    ok = delete_resume(resume_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return {"status": "success", "message": "Resume deleted."}
+
+# ==================== Candidate Credentials / Preferences ====================
+
+class SaveCredentialsRequest(BaseModel):
+    candidate_name: Optional[str] = "Alex"
+    dob: Optional[str] = ""
+    company: Optional[str] = "Google"
+    role: Optional[str] = "Software Engineer (SDE I/II)"
+    difficulty: Optional[str] = "Medium"
+    selected_rounds: Optional[List[str]] = ["dsa_1", "technical", "hr"]
+    additional_context: Optional[str] = ""
+
+@app.get("/api/credentials")
+def get_saved_credentials():
+    creds = get_setting("candidate_credentials", {
+        "candidate_name": "Alex",
+        "dob": "",
+        "company": "Google",
+        "role": "Software Engineer (SDE I/II)",
+        "difficulty": "Medium",
+        "selected_rounds": ["dsa_1", "technical", "hr"],
+        "additional_context": "Maintain a realistic technical bar. Ask probing follow-ups on performance bottlenecks and edge cases."
+    })
+    return creds
+
+@app.post("/api/credentials")
+def save_credentials_endpoint(req: SaveCredentialsRequest):
+    save_setting("candidate_credentials", req.dict())
+    return {"status": "success", "message": "Credentials saved."}
 
 # ==================== Interview Session & Chat ====================
 

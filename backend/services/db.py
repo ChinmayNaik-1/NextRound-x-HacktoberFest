@@ -57,6 +57,20 @@ def init_db():
             transcripts TEXT
         )
     """)
+    # Resumes table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS resumes (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            candidate_name TEXT,
+            file_name TEXT,
+            raw_text TEXT NOT NULL,
+            detected_skills TEXT,
+            is_active INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
     # Safe column migrations
     cursor.execute("PRAGMA table_info(interviews)")
     existing_cols = [c[1] for c in cursor.fetchall()]
@@ -201,5 +215,121 @@ def list_past_interviews() -> List[Dict[str, Any]]:
         d["scores"] = json.loads(d["scores"] or "{}")
         results.append(d)
     return results
+
+# ----------------- Resumes Management -----------------
+
+def add_resume(title: str, raw_text: str, candidate_name: str = "", file_name: str = "", detected_skills: Optional[List[str]] = None, make_active: bool = True) -> Dict[str, Any]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    resume_id = str(uuid.uuid4())[:8]
+    
+    if make_active:
+        cursor.execute("UPDATE resumes SET is_active = 0")
+        
+    cursor.execute("""
+        INSERT INTO resumes (id, title, candidate_name, file_name, raw_text, detected_skills, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        resume_id,
+        title.strip(),
+        (candidate_name or "").strip(),
+        (file_name or "").strip(),
+        raw_text.strip(),
+        json.dumps(detected_skills or []),
+        1 if make_active else 0
+    ))
+    conn.commit()
+    conn.close()
+    return {
+        "id": resume_id,
+        "title": title,
+        "candidate_name": candidate_name,
+        "file_name": file_name,
+        "raw_text": raw_text,
+        "detected_skills": detected_skills or [],
+        "is_active": make_active
+    }
+
+def list_resumes() -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, candidate_name, file_name, raw_text, detected_skills, is_active, created_at FROM resumes ORDER BY created_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    result = []
+    for r in rows:
+        result.append({
+            "id": r["id"],
+            "title": r["title"],
+            "candidate_name": r["candidate_name"] or "",
+            "file_name": r["file_name"] or "",
+            "raw_text": r["raw_text"],
+            "detected_skills": json.loads(r["detected_skills"] or "[]"),
+            "is_active": bool(r["is_active"]),
+            "created_at": r["created_at"]
+        })
+    return result
+
+def get_active_resume() -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, candidate_name, file_name, raw_text, detected_skills, is_active, created_at FROM resumes WHERE is_active = 1 LIMIT 1")
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute("SELECT id, title, candidate_name, file_name, raw_text, detected_skills, is_active, created_at FROM resumes ORDER BY created_at DESC LIMIT 1")
+        row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["detected_skills"] = json.loads(d["detected_skills"] or "[]")
+    d["is_active"] = bool(d["is_active"])
+    return d
+
+def set_active_resume(resume_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE resumes SET is_active = 0")
+    cursor.execute("UPDATE resumes SET is_active = 1 WHERE id = ?", (resume_id,))
+    changed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+def delete_resume(resume_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM resumes WHERE id = ?", (resume_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+# ----------------- Settings / Credentials -----------------
+
+def save_setting(key: str, value: Any):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)", (
+        key,
+        json.dumps(value) if not isinstance(value, str) else value
+    ))
+    conn.commit()
+    conn.close()
+
+def get_setting(key: str, default: Any = None) -> Any:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return default
+    val = row["value"]
+    try:
+        return json.loads(val)
+    except:
+        return val
 
 init_db()

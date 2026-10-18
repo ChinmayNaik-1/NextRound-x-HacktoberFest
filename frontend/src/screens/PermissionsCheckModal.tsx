@@ -38,6 +38,7 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
 
   // Audio playback test
   const [isRecordingPlayback, setIsRecordingPlayback] = useState<boolean>(false);
+  const [recordingCountdown, setRecordingCountdown] = useState<number>(3);
   const [playbackAudioUrl, setPlaybackAudioUrl] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -47,16 +48,56 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
-  // 1. Test Camera explicitly
+  // Helper with guaranteed timeout so driver/Electron never hangs on permission/missing device
+  const getUserMediaWithTimeout = (
+    constraints: MediaStreamConstraints,
+    timeoutMs = 3500
+  ): Promise<MediaStream> => {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error("Device request timed out (Hardware unavailable or in use)"));
+        }
+      }, timeoutMs);
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        clearTimeout(timer);
+        reject(new Error("navigator.mediaDevices not available"));
+        return;
+      }
+
+      navigator.mediaDevices
+        .getUserMedia(constraints)
+        .then((s) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(s);
+          }
+        })
+        .catch((err) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+        });
+    });
+  };
+
+  // 1. Test Camera explicitly (with timeout)
   const testCamera = async () => {
     setCameraStatus('testing');
     try {
       if (videoStreamRef.current) {
         videoStreamRef.current.getTracks().forEach((t) => t.stop());
       }
-      const vs = await navigator.mediaDevices.getUserMedia({
-        video: { width: 480, height: 360 }
-      });
+      const vs = await getUserMediaWithTimeout(
+        { video: { width: 480, height: 360 } },
+        3000
+      );
       videoStreamRef.current = vs;
       setVideoStream(vs);
       setCameraStatus('granted');
@@ -64,7 +105,7 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
         videoRef.current.srcObject = vs;
       }
     } catch (err: any) {
-      console.warn("Camera test failed:", err);
+      console.warn("Camera test not accessible or timed out (Optional preview):", err);
       setCameraStatus('denied');
     }
   };
@@ -76,7 +117,7 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
       if (audioStreamRef.current) {
         audioStreamRef.current.getTracks().forEach((t) => t.stop());
       }
-      const as = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const as = await getUserMediaWithTimeout({ audio: true }, 3500);
       audioStreamRef.current = as;
       setAudioStream(as);
       setMicStatus('granted');
@@ -84,6 +125,9 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
       // Start Audio Volume Meter
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
+        if (audioContextRef.current) {
+          audioContextRef.current.close().catch(() => {});
+        }
         const audioCtx = new AudioCtx();
         audioContextRef.current = audioCtx;
         const analyser = audioCtx.createAnalyser();
@@ -95,13 +139,14 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
         const updateLevel = () => {
-          analyser.getByteFrequencyData(dataArray);
+          if (!analyserRef.current) return;
+          analyserRef.current.getByteFrequencyData(dataArray);
           let sum = 0;
           for (let i = 0; i < dataArray.length; i++) {
             sum += dataArray[i];
           }
           const avg = sum / dataArray.length;
-          setMicLevel(Math.min(100, Math.round(avg * 1.8)));
+          setMicLevel(Math.min(100, Math.round(avg * 2.2)));
           animationFrameRef.current = requestAnimationFrame(updateLevel);
         };
         updateLevel();
@@ -114,15 +159,19 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
 
   // 3. Record a 3-second sample and play back to verify mic + headphones
   const handleRecordPlaybackSample = async () => {
-    if (!audioStreamRef.current) {
+    let streamToUse = audioStreamRef.current;
+    if (!streamToUse) {
       await testMicrophone();
+      streamToUse = audioStreamRef.current;
     }
-    try {
-      const streamToUse = audioStreamRef.current || await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = streamToUse;
-      setAudioStream(streamToUse);
-      audioChunksRef.current = [];
 
+    if (!streamToUse) {
+      alert("Microphone access could not be acquired. Please ensure a microphone is connected and click 'Test Mic'.");
+      return;
+    }
+
+    try {
+      audioChunksRef.current = [];
       const recorder = new MediaRecorder(streamToUse);
       mediaRecorderRef.current = recorder;
 
@@ -131,33 +180,52 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const mime = recorder.mimeType || 'audio/webm';
+        const blob = new Blob(audioChunksRef.current, { type: mime });
         const url = URL.createObjectURL(blob);
         setPlaybackAudioUrl(url);
         setIsRecordingPlayback(false);
+        // Instant auto play
+        const audio = new Audio(url);
+        audio.play().catch(() => {});
       };
 
       recorder.start();
       setIsRecordingPlayback(true);
+      setRecordingCountdown(3);
 
-      // Auto stop after 3 seconds
+      const countInterval = setInterval(() => {
+        setRecordingCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(countInterval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      // Stop recorder after 3s
       setTimeout(() => {
+        clearInterval(countInterval);
         if (recorder.state === 'recording') {
           recorder.stop();
         }
       }, 3000);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error("Recording sample error", e);
+      alert("Recording test failed: " + (e.message || "Microphone busy"));
       setIsRecordingPlayback(false);
     }
   };
 
-  // 4. Test TTS Speaker
-  const handleTestSpeaker = () => {
+  // 4. Test TTS Speaker (Instant audio chime + TTS voice)
+  const handleTestSpeaker = async () => {
+    setSpeakerTested(true);
+    // Instant confirmation tone through user's speakers/headphones
+    await SpeechService.playChime();
+    // Spoken voice
     SpeechService.speak(
-      "Audio check passed. Your speakers and text to speech synthesizer are functioning properly.",
-      () => setSpeakerTested(true),
-      () => setSpeakerTested(true)
+      "Audio check passed. Your speakers and text to speech synthesizer are functioning properly."
     );
   };
 
@@ -178,12 +246,18 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
     }
   };
 
-  // Auto-attempt initial permissions gracefully on modal open
+  // Sequential graceful initial permissions check
   useEffect(() => {
-    testMicrophone();
-    testCamera();
+    let mounted = true;
+    async function init() {
+      await testMicrophone();
+      if (!mounted) return;
+      await testCamera();
+    }
+    init();
 
     return () => {
+      mounted = false;
       cleanupStreams();
     };
   }, []);
@@ -333,7 +407,7 @@ export const PermissionsCheckModal: React.FC<PermissionsCheckModalProps> = ({
               }`}
             >
               {isRecordingPlayback ? <Square className="w-3 h-3 fill-white" /> : <Mic className="w-3 h-3 text-brand-red" />}
-              <span>{isRecordingPlayback ? "Recording 3s Sample..." : "Record 3s Mic Test"}</span>
+              <span>{isRecordingPlayback ? `Recording (${recordingCountdown}s)... Speak now` : "Record 3s Mic Test"}</span>
             </button>
 
             {playbackAudioUrl && (

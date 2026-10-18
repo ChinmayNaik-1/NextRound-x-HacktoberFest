@@ -2,6 +2,10 @@ const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 
+// Auto-allow camera & microphone streams without headless prompt hang
+app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 let mainWindow;
 let backendProcess;
 
@@ -79,14 +83,17 @@ ipcMain.on('toggle-fullscreen', () => {
 app.whenReady().then(() => {
   // Automatically permit camera and microphone in Electron
   if (session && session.defaultSession) {
-    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-      const allowed = ['media', 'camera', 'microphone', 'fullscreen'];
-      callback(allowed.includes(permission) || permission.startsWith('media'));
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+      callback(true);
     });
 
-    session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
       return true;
     });
+
+    if (session.defaultSession.setDevicePermissionHandler) {
+      session.defaultSession.setDevicePermissionHandler(() => true);
+    }
   }
 
   startBackend();
