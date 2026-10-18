@@ -105,3 +105,15 @@ Desktop.ini
 *.njsproj
 *.sln
 *.sw?
+
+# ==========================================
+# Hackathon Documentation & Prompts (Local Only)
+# ==========================================
+Hacktoberfest Hack Day – Themes & Judging Criteria.pdf
+*.pdf
+
+# ==========================================
+# Temporary Test Screenshots
+# ==========================================
+frontend/screenshot_*.png
+
