@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, CameraOff } from 'lucide-react';
+import { Camera, CameraOff, ChevronDown, ChevronUp, ArrowUpDown, Video } from 'lucide-react';
 
 interface CameraFeedProps {
   isPiP?: boolean;
@@ -10,6 +10,8 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [hasCamera, setHasCamera] = useState(true);
   const [isCameraOff, setIsCameraOff] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [position, setPosition] = useState<'top' | 'bottom'>('top');
 
   useEffect(() => {
     let activeStream: MediaStream | null = null;
@@ -38,6 +40,13 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
     };
   }, []);
 
+  // When unminimizing, reconnect stream to video element
+  useEffect(() => {
+    if (!isMinimized && stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [isMinimized, stream]);
+
   const toggleCamera = () => {
     if (stream) {
       stream.getVideoTracks().forEach((track) => {
@@ -47,13 +56,107 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
     }
   };
 
-  const containerClasses = isPiP
-    ? "fixed bottom-5 right-5 z-40 w-56 bg-white rounded-card overflow-hidden shadow-elevated border border-gray-200 transition-all hover:shadow-2xl"
-    : "w-full aspect-video bg-gray-900 rounded-card overflow-hidden relative shadow-card border border-gray-200";
+  const togglePosition = () => {
+    setPosition((prev) => (prev === 'top' ? 'bottom' : 'top'));
+  };
+
+  if (!isPiP) {
+    return (
+      <div className="w-full aspect-video bg-gray-900 rounded-card overflow-hidden relative shadow-card border border-gray-200">
+        <div className="relative w-full h-full bg-gray-900 flex items-center justify-center">
+          {hasCamera && !isCameraOff ? (
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover mirror"
+              style={{ transform: "scaleX(-1)" }}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center p-4 text-center text-gray-400">
+              <CameraOff className="w-8 h-8 mb-1.5 opacity-60" />
+              <span className="text-xs">Camera Feed Inactive</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Minimized Pill representation (Never blocks anything)
+  if (isMinimized) {
+    const pillPosition = position === 'top' ? 'top-16 right-6' : 'bottom-28 right-6';
+    return (
+      <div className={`fixed ${pillPosition} z-40 transition-all`}>
+        <button
+          type="button"
+          onClick={() => setIsMinimized(false)}
+          className="bg-gray-900/90 hover:bg-black text-white px-3 py-1.5 rounded-full shadow-lg border border-gray-700/80 flex items-center gap-2 text-xs backdrop-blur-md transition-all cursor-pointer group"
+          title="Click to expand camera preview"
+        >
+          <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
+          <span className="text-[11px] font-medium text-gray-200 group-hover:text-white">
+            {isCameraOff ? "Camera Off" : "Live Camera"}
+          </span>
+          <ChevronUp className="w-3.5 h-3.5 text-gray-400 group-hover:text-white transition-colors" />
+        </button>
+      </div>
+    );
+  }
+
+  // Expanded PiP floating window
+  // Placed at top-20 right-6 or bottom-28 right-6 (safely above the bottom response console)
+  const posClass = position === 'top' ? 'top-20 right-6' : 'bottom-28 right-6';
 
   return (
-    <div className={containerClasses}>
-      <div className="relative w-full h-full bg-gray-900 flex items-center justify-center">
+    <div
+      className={`fixed ${posClass} z-40 w-52 bg-gray-900 rounded-xl overflow-hidden shadow-2xl border border-gray-700/80 transition-all`}
+    >
+      {/* Top Controls Bar */}
+      <div className="bg-black/70 backdrop-blur-sm px-2.5 py-1.5 flex items-center justify-between border-b border-gray-800 text-white">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
+          <span className="text-[10px] font-semibold tracking-wider uppercase text-gray-200">
+            Preview
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {/* Mute / Unmute Camera */}
+          <button
+            type="button"
+            onClick={toggleCamera}
+            title={isCameraOff ? "Enable Camera" : "Turn Off Camera"}
+            className="p-1 text-gray-300 hover:text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
+          >
+            {isCameraOff ? <CameraOff className="w-3 h-3 text-brand-red" /> : <Camera className="w-3 h-3" />}
+          </button>
+
+          {/* Toggle Position Top / Bottom */}
+          <button
+            type="button"
+            onClick={togglePosition}
+            title={position === 'top' ? "Move to Bottom" : "Move to Top"}
+            className="p-1 text-gray-300 hover:text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
+          >
+            <ArrowUpDown className="w-3 h-3" />
+          </button>
+
+          {/* Minimize Button */}
+          <button
+            type="button"
+            onClick={() => setIsMinimized(true)}
+            title="Minimize Camera to Pill"
+            className="p-1 text-gray-300 hover:text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
+          >
+            <ChevronDown className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+
+      {/* Video Viewport */}
+      <div className="relative w-full aspect-video bg-gray-950 flex items-center justify-center">
         {hasCamera && !isCameraOff ? (
           <video
             ref={videoRef}
@@ -64,30 +167,11 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({ isPiP = true }) => {
             style={{ transform: "scaleX(-1)" }}
           />
         ) : (
-          <div className="flex flex-col items-center justify-center p-4 text-center text-gray-400">
-            <CameraOff className="w-8 h-8 mb-1.5 opacity-60" />
-            <span className="text-xs">Camera Feed Inactive</span>
+          <div className="flex flex-col items-center justify-center p-3 text-center text-gray-400">
+            <CameraOff className="w-6 h-6 mb-1 opacity-60 text-brand-red" />
+            <span className="text-[10px] text-gray-400">Camera Inactive</span>
           </div>
         )}
-
-        {/* Live Proctoring Badge */}
-        <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
-          <span className="text-[10px] font-medium text-white tracking-wider uppercase">
-            Rec
-          </span>
-        </div>
-
-        {/* Floating Quick Action Overlay */}
-        <div className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-1 rounded-full">
-          <button
-            onClick={toggleCamera}
-            title={isCameraOff ? "Turn Camera On" : "Turn Camera Off"}
-            className="text-white hover:text-gray-300 transition-colors p-0.5 cursor-pointer"
-          >
-            {isCameraOff ? <CameraOff className="w-3.5 h-3.5 text-brand-red" /> : <Camera className="w-3.5 h-3.5" />}
-          </button>
-        </div>
       </div>
     </div>
   );

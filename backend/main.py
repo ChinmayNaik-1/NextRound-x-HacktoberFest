@@ -17,8 +17,10 @@ from services.question_bank import get_question_for_company, QUESTIONS_DB
 from services.code_runner import execute_code
 from services.resume_parser import parse_pdf_resume, summarize_resume
 from services.ai_agent import AIAgent, verify_provider_api_key
+from services.speech import transcribe_audio_file
 
 app = FastAPI(title="InterviewAI Backend", version="1.0.0")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -265,6 +267,38 @@ def start_interview_session(req: StartInterviewRequest):
     save_interview(data)
     return {"session_id": session_id, "data": data}
 
+# ==================== Speech-to-Text Transcription ====================
+
+@app.post("/api/speech/transcribe")
+async def transcribe_speech_endpoint(
+    audio: UploadFile = File(...),
+    provider: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
+    key_id: Optional[str] = Form(None)
+):
+    content = await audio.read()
+    key = api_key
+    if not key and key_id:
+        k_record = get_api_key_by_id(key_id)
+        if k_record:
+            key = k_record["api_key"]
+    if not key:
+        active = get_active_api_key()
+        if active:
+            key = active["api_key"]
+            if not provider:
+                provider = active["provider"]
+    
+    res = transcribe_audio_file(
+        audio_bytes=content,
+        mime_type=audio.content_type or "audio/webm",
+        provider=provider or "gemini",
+        api_key=key
+    )
+    return res
+
+# ==================== Live Chat Turn ====================
+
 class ChatTurnRequest(BaseModel):
     round_type: str
     company: str
@@ -275,6 +309,11 @@ class ChatTurnRequest(BaseModel):
     provider: Optional[str] = "gemini"
     api_key: Optional[str] = ""
     key_id: Optional[str] = ""
+    current_question: Optional[Dict[str, Any]] = None
+    candidate_code: Optional[str] = None
+    language: Optional[str] = "python"
+    execution_report: Optional[Dict[str, Any]] = None
+    submission_status: Optional[str] = "in_progress"
 
 @app.post("/api/interview/chat")
 def interview_chat_endpoint(req: ChatTurnRequest):
@@ -287,6 +326,8 @@ def interview_chat_endpoint(req: ChatTurnRequest):
         active = get_active_api_key()
         if active:
             key = active["api_key"]
+            if not req.provider:
+                req.provider = active["provider"]
 
     agent = AIAgent(provider=req.provider, api_key=key)
     ai_reply = agent.chat_interviewer(
@@ -295,9 +336,15 @@ def interview_chat_endpoint(req: ChatTurnRequest):
         role=req.role,
         messages=req.messages,
         resume_summary=req.resume_summary or "",
-        additional_context=req.additional_context or ""
+        additional_context=req.additional_context or "",
+        current_question=req.current_question,
+        candidate_code=req.candidate_code,
+        language=req.language or "python",
+        execution_report=req.execution_report,
+        submission_status=req.submission_status or "in_progress"
     )
     return {"reply": ai_reply}
+
 
 class FinishInterviewRequest(BaseModel):
     session_id: str

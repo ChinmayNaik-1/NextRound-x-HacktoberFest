@@ -405,6 +405,34 @@ export async function startInterviewSession(config: InterviewConfig): Promise<st
   return "local-session-" + Date.now();
 }
 
+export async function transcribeAudio(
+  audioBlob: Blob,
+  provider?: string,
+  apiKey?: string,
+  keyId?: string
+): Promise<{ transcript: string; error?: string }> {
+  try {
+    const formData = new FormData();
+    formData.append("audio", audioBlob, "recording.webm");
+    if (provider) formData.append("provider", provider);
+    if (apiKey) formData.append("api_key", apiKey);
+    if (keyId) formData.append("key_id", keyId);
+
+    const res = await fetch(`${API_BASE}/speech/transcribe`, {
+      method: "POST",
+      body: formData,
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+    const errText = await res.text();
+    return { transcript: "", error: errText || "Transcription failed" };
+  } catch (e: any) {
+    console.error("transcribeAudio error:", e);
+    return { transcript: "", error: e.message || "Failed to connect to transcription service" };
+  }
+}
+
 export async function sendInterviewChat(
   round_type: RoundType,
   company: string,
@@ -414,7 +442,12 @@ export async function sendInterviewChat(
   additional_context: string,
   provider: string,
   api_key?: string,
-  key_id?: string
+  key_id?: string,
+  current_question?: any,
+  candidate_code?: string,
+  language?: string,
+  execution_report?: any,
+  submission_status?: string
 ): Promise<string> {
   try {
     const res = await fetch(`${API_BASE}/interview/chat`, {
@@ -429,7 +462,12 @@ export async function sendInterviewChat(
         additional_context,
         provider,
         api_key: api_key || "",
-        key_id: key_id || ""
+        key_id: key_id || "",
+        current_question: current_question || null,
+        candidate_code: candidate_code || null,
+        language: language || "python",
+        execution_report: execution_report || null,
+        submission_status: submission_status || "in_progress"
       })
     });
     if (res.ok) {
@@ -441,6 +479,7 @@ export async function sendInterviewChat(
   }
   return "That makes sense. Can you walk me through the key architectural decisions you made in that project and how you evaluated performance bottlenecks?";
 }
+
 
 export async function finishInterviewSession(
   session_id: string,

@@ -4,10 +4,23 @@ import requests
 from typing import Dict, Any, List, Optional
 
 def resolve_gemini_model(api_key: str) -> Optional[str]:
-    """Dynamically queries Google AI Studio to discover the supported generateContent model for this key."""
+    """Dynamically queries Google AI Studio to discover the supported, active generateContent model for this key."""
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
+        
+        # Priority list of modern, active Gemini models
+        priority_models = [
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash",
+            "gemini-flash-latest",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-pro-latest"
+        ]
         
         # 1. Try listing models from Google API
         try:
@@ -15,39 +28,34 @@ def resolve_gemini_model(api_key: str) -> Optional[str]:
             for m in genai.list_models():
                 methods = getattr(m, "supported_generation_methods", [])
                 if "generateContent" in methods:
-                    available.append(m.name)
-            if available:
-                # Prioritize flash or pro models
-                for pref in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-pro", "gemini-1.5-pro"]:
-                    for name in available:
-                        if pref in name:
-                            return name.replace("models/", "")
-                return available[0].replace("models/", "")
+                    available.append(m.name.replace("models/", ""))
+            
+            for pref in priority_models:
+                if pref in available:
+                    # Quick ping to verify quota / viability
+                    try:
+                        m = genai.GenerativeModel(pref)
+                        r = m.generate_content("ping", request_options={"timeout": 5})
+                        if r and r.text:
+                            return pref
+                    except Exception:
+                        continue
         except Exception:
             pass
 
         # 2. Try candidate list fallback
-        candidates = [
-            "gemini-1.5-flash-latest",
-            "gemini-2.0-flash-exp",
-            "gemini-2.0-flash",
-            "gemini-pro",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "models/gemini-1.5-flash",
-            "models/gemini-pro"
-        ]
-        for c in candidates:
+        for c in priority_models:
             try:
                 m = genai.GenerativeModel(c)
-                resp = m.generate_content("ping")
+                resp = m.generate_content("ping", request_options={"timeout": 5})
                 if resp and resp.text:
                     return c
             except Exception:
                 continue
     except Exception:
         pass
-    return None
+    return "gemini-flash-lite-latest"
+
 
 def verify_provider_api_key(provider: str, api_key: str) -> Dict[str, Any]:
     prov = (provider or "gemini").lower().strip()
@@ -141,8 +149,8 @@ class AIAgent:
             genai.configure(api_key=self.api_key)
             
             # Resolve or use candidate models
-            model_to_use = self.model or resolve_gemini_model(self.api_key) or "gemini-1.5-flash-latest"
-            candidates = [model_to_use, "gemini-1.5-flash-latest", "gemini-2.0-flash", "gemini-pro", "gemini-1.5-flash"]
+            model_to_use = self.model or resolve_gemini_model(self.api_key) or "gemini-flash-lite-latest"
+            candidates = [model_to_use, "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest"]
             
             for m_name in dict.fromkeys(candidates):
                 try:
@@ -295,25 +303,86 @@ Return a valid JSON object strictly matching this schema:
                 ]
             }
 
-    def chat_interviewer(self, round_type: str, company: str, role: str, messages: List[Dict[str, str]], resume_summary: str, additional_context: str) -> str:
-        sys_prompt = f"""You are a professional, realistic {company} interviewer conducting a {round_type} interview for {role}.
-Candidate Resume Highlights: {resume_summary}
-Tone / Style: {additional_context or 'Realistic, concise, rigorous.'}
+    def chat_interviewer(
+        self,
+        round_type: str,
+        company: str,
+        role: str,
+        messages: List[Dict[str, str]],
+        resume_summary: str = "",
+        additional_context: str = "",
+        current_question: Optional[Dict[str, Any]] = None,
+        candidate_code: Optional[str] = None,
+        language: Optional[str] = "python",
+        execution_report: Optional[Dict[str, Any]] = None,
+        submission_status: Optional[str] = "in_progress"
+    ) -> str:
+        # Build live coding & execution context block
+        coding_context = ""
+        if current_question:
+            q_title = current_question.get("title", "Coding Problem")
+            q_diff = current_question.get("difficulty", "Medium")
+            q_desc = current_question.get("description", "")
+            coding_context += f"\n--- CURRENT PROBLEM ---\nProblem: {q_title} ({q_diff})\nDescription: {q_desc[:400]}...\n"
 
-Rules:
-1. Keep spoken responses concise (2-4 sentences max).
-2. Ask one clear question or follow-up at a time.
-3. In DSA follow-up: ask about complexity, memory trade-offs, and alternative approaches.
-4. In Technical round: focus on their projects and CS/AI fundamentals.
-5. In HR round: focus on STAR format and leadership.
+        if candidate_code is not None and candidate_code.strip():
+            coding_context += f"\n--- CANDIDATE'S CODE ({language or 'python'}) ---\n{candidate_code.strip()}\n"
+
+        if execution_report:
+            passed = execution_report.get("passed_cases", 0)
+            total = execution_report.get("total_cases", 0)
+            all_passed = execution_report.get("all_passed", False)
+            comp_err = execution_report.get("compilation_error")
+            coding_context += f"\n--- TEST EXECUTION STATUS ---\nStatus: {submission_status or 'tested'}\nPassed Cases: {passed}/{total}\nAll Passed: {all_passed}\n"
+            if comp_err:
+                coding_context += f"Compilation / Runtime Error: {comp_err}\n"
+            else:
+                for idx, res in enumerate(execution_report.get("results", [])):
+                    if not res.get("passed"):
+                        coding_context += f"First Failing Case: input={res.get('input')}, expected={res.get('expected')}, actual={res.get('actual')}\n"
+                        break
+
+        sys_prompt = f"""You are a senior tech lead / engineering interviewer at {company} conducting a live {round_type} interview for {role}.
+Candidate Resume Highlights: {resume_summary}
+Tone / Style: {additional_context or 'Realistic, concise, encouraging yet rigorous.'}
+
+{coding_context}
+
+CRITICAL INTERVIEWER GUIDELINES:
+1. You have direct visibility into the candidate's code and test results above. Always make your feedback directly relevant to their code, approach, and test status!
+2. If the candidate asks for help or is failing test cases: look at their actual code and the failing test case, and give a targeted conceptual hint (e.g. mention boundary conditions, negative numbers, or pointer edge cases) without writing the full solution for them.
+3. If the candidate has passed all test cases: congratulate them on passing all test cases, and challenge them to explain their asymptotic time and space complexity, or ask how they would optimize if the input scaled to billions.
+4. If the candidate has a compilation error: gently guide them to check syntax or variables around the error.
+5. If the candidate is explaining an algorithm or approach aloud: validate whether the idea is sound for this problem, mention tradeoffs (e.g. hash map vs two pointers), and encourage them.
+6. Keep spoken responses concise (2 to 4 sentences maximum) so that Text-to-Speech sounds natural and conversational. Avoid markdown headers, asterisks, bullet lists, or huge code blocks.
 """
         conv_str = ""
         for m in messages[-6:]:
             role_label = "Interviewer" if m.get("role") == "assistant" else "Candidate"
             conv_str += f"{role_label}: {m.get('content')}\n"
         
-        prompt = f"Recent Conversation:\n{conv_str}\nInterviewer (provide your next response):"
-        return self.query_llm(prompt, sys_prompt)
+        prompt = f"Recent Conversation:\n{conv_str}\nInterviewer (provide your next concise spoken response):"
+        reply = self.query_llm(prompt, sys_prompt)
+
+        # Context-aware fallback if LLM is offline or exhausted
+        if not reply or not reply.strip():
+            if execution_report and execution_report.get("compilation_error"):
+                reply = f"I see a compilation error in your code: {execution_report.get('compilation_error')[:60]}. Take a look at your syntax and variable definitions."
+            elif execution_report and execution_report.get("all_passed"):
+                reply = f"Excellent job! Your code passed all test cases. Can you walk me through the asymptotic time and space complexity of your solution?"
+            elif execution_report and execution_report.get("total_cases", 0) > 0:
+                p = execution_report.get("passed_cases", 0)
+                t = execution_report.get("total_cases", 0)
+                reply = f"I see your code is currently passing {p} of {t} test cases. Consider edge cases like empty collections, negative numbers, or duplicates where your logic might behave unexpectedly."
+            elif candidate_code and len(candidate_code.strip()) > 30:
+                reply = f"Good progress on the code. Walk me through how you plan to handle the lookup and edge cases efficiently."
+            elif current_question:
+                reply = f"Take your time to understand {current_question.get('title', 'the problem')}. Feel free to start by discussing brute-force approaches before coding."
+            else:
+                reply = "Good points. Can you elaborate further on how that approach scales under heavy load?"
+
+        return reply
+
 
     def generate_final_report(self, interview_data: Dict[str, Any]) -> Dict[str, Any]:
         # Determine exactly which rounds were actually completed

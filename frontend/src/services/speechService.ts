@@ -173,89 +173,166 @@ export class SpeechService {
     return window.speechSynthesis ? window.speechSynthesis.speaking : false;
   }
 
-  // 2. Speech-to-Text (STT)
+  // 2. Speech-to-Text (STT) with MediaRecorder & SpeechRecognition
+  private static mediaRecorder: MediaRecorder | null = null;
+  private static audioChunks: Blob[] = [];
+  private static mediaStream: MediaStream | null = null;
+  private static accumulatedTranscript: string = "";
+
   public static isSpeechRecognitionSupported(): boolean {
     return !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
   }
 
+  public static async startRecording(
+    onInterim?: (text: string) => void,
+    onFinal?: (text: string) => void,
+    onError?: (err: any) => void
+  ): Promise<boolean> {
+    SpeechService.accumulatedTranscript = "";
+    SpeechService.audioChunks = [];
+
+    // 1. Start audio media stream for robust backend transcription
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      SpeechService.mediaStream = stream;
+
+      let mimeType = 'audio/webm';
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+          mimeType = 'audio/ogg;codecs=opus';
+        }
+
+        const recorder = new MediaRecorder(stream, { mimeType });
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            SpeechService.audioChunks.push(event.data);
+          }
+        };
+        recorder.start(250); // collect in 250ms chunks
+        SpeechService.mediaRecorder = recorder;
+        SpeechService.isListening = true;
+      }
+    } catch (err) {
+      console.warn("Could not start MediaRecorder:", err);
+      // Continue to try browser SpeechRecognition even if MediaRecorder failed
+    }
+
+    // 2. Start browser SpeechRecognition for live interim feedback (if supported)
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      try {
+        if (SpeechService.recognition) {
+          SpeechService.recognition.abort();
+        }
+
+        const rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+
+        rec.onstart = () => {
+          SpeechService.isListening = true;
+        };
+
+        rec.onresult = (event: any) => {
+          let interimTranscript = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const item = event.results[i];
+            if (item.isFinal) {
+              SpeechService.accumulatedTranscript += (SpeechService.accumulatedTranscript ? " " : "") + item[0].transcript;
+              if (onFinal) onFinal(item[0].transcript);
+            } else {
+              interimTranscript += item[0].transcript;
+            }
+          }
+          if (interimTranscript && onInterim) {
+            onInterim(interimTranscript);
+          }
+        };
+
+        rec.onerror = (event: any) => {
+          console.warn("Speech recognition notice:", event.error);
+          if (event.error !== 'no-speech' && onError) {
+            onError(event);
+          }
+        };
+
+        rec.onend = () => {
+          // If mediaRecorder is still running, speech recognition may have cycled
+        };
+
+        rec.start();
+        SpeechService.recognition = rec;
+      } catch (err) {
+        console.warn("Failed to initialize SpeechRecognition:", err);
+      }
+    }
+
+    return SpeechService.isListening;
+  }
+
+  public static stopRecording(): Promise<{ text: string; audioBlob: Blob | null }> {
+    return new Promise((resolve) => {
+      SpeechService.isListening = false;
+
+      // Stop SpeechRecognition
+      if (SpeechService.recognition) {
+        try {
+          SpeechService.recognition.stop();
+        } catch (e) {}
+        SpeechService.recognition = null;
+      }
+
+      const currentText = SpeechService.accumulatedTranscript.trim();
+
+      // Stop MediaRecorder and produce Blob
+      if (SpeechService.mediaRecorder && SpeechService.mediaRecorder.state !== 'inactive') {
+        SpeechService.mediaRecorder.onstop = () => {
+          const mimeType = SpeechService.mediaRecorder?.mimeType || 'audio/webm';
+          const blob = new Blob(SpeechService.audioChunks, { type: mimeType });
+          
+          // Stop media stream tracks
+          if (SpeechService.mediaStream) {
+            SpeechService.mediaStream.getTracks().forEach((t) => t.stop());
+            SpeechService.mediaStream = null;
+          }
+          SpeechService.mediaRecorder = null;
+          SpeechService.audioChunks = [];
+
+          resolve({ text: currentText, audioBlob: blob });
+        };
+        SpeechService.mediaRecorder.stop();
+      } else {
+        if (SpeechService.mediaStream) {
+          SpeechService.mediaStream.getTracks().forEach((t) => t.stop());
+          SpeechService.mediaStream = null;
+        }
+        resolve({ text: currentText, audioBlob: null });
+      }
+    });
+  }
+
+  // Backwards-compatible aliases
   public static startListening(
     onInterim: (text: string) => void,
     onFinal: (text: string) => void,
     onError?: (err: any) => void,
     onEnd?: () => void
   ): boolean {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      if (onError) onError(new Error("Speech recognition not supported in this browser/environment"));
-      return false;
-    }
-
-    try {
-      if (SpeechService.recognition) {
-        SpeechService.recognition.abort();
-      }
-
-      const rec = new SpeechRecognition();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = 'en-US';
-
-      rec.onstart = () => {
-        SpeechService.isListening = true;
-      };
-
-      rec.onresult = (event: any) => {
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const item = event.results[i];
-          if (item.isFinal) {
-            onFinal(item[0].transcript);
-          } else {
-            interimTranscript += item[0].transcript;
-          }
-        }
-        if (interimTranscript) {
-          onInterim(interimTranscript);
-        }
-      };
-
-      rec.onerror = (event: any) => {
-        console.warn("Speech recognition error:", event.error);
-        if (event.error !== 'no-speech' && onError) {
-          onError(event);
-        }
-      };
-
-      rec.onend = () => {
-        SpeechService.isListening = false;
-        if (onEnd) onEnd();
-      };
-
-      rec.start();
-      SpeechService.recognition = rec;
-      return true;
-    } catch (err) {
-      console.error("Failed to start speech recognition:", err);
-      if (onError) onError(err);
-      return false;
-    }
+    SpeechService.startRecording(onInterim, onFinal, onError);
+    return true;
   }
 
   public static stopListening(): void {
-    if (SpeechService.recognition) {
-      try {
-        SpeechService.recognition.stop();
-      } catch (e) {
-        // Ignore stop error
-      }
-      SpeechService.recognition = null;
-      SpeechService.isListening = false;
-    }
+    SpeechService.stopRecording();
   }
 
   public static isCurrentlyListening(): boolean {
     return SpeechService.isListening;
   }
 }
+

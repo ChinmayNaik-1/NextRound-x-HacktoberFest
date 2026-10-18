@@ -11,10 +11,12 @@ import {
   Award,
   SkipForward,
   Square,
-  Send
+  Send,
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { InterviewConfig, ChatMessage } from '../types';
-import { sendInterviewChat } from '../services/api';
+import { sendInterviewChat, transcribeAudio } from '../services/api';
 import { VoiceOrb } from '../components/VoiceOrb';
 import { CameraFeed } from '../components/CameraFeed';
 import { SpeechService } from '../services/speechService';
@@ -40,6 +42,10 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isListeningMic, setIsListeningMic] = useState(false);
   const [typedInput, setTypedInput] = useState("");
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingTimerRef = useRef<any>(null);
+
 
   const speechRecognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -121,13 +127,19 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
     setAiCaption("Interrupted interviewer. You can speak or type your answer now.");
   };
 
-  const startMicRecognition = () => {
+  const startMicRecognition = async () => {
     SpeechService.stopSpeaking();
     setIsListeningMic(true);
+    setRecordingSeconds(0);
     setAiStatus('listening');
-    setAiCaption("Listening to your voice... (Click 'Send' or 'Stop Mic' when done)");
+    setAiCaption("Listening to your response... Click 'Stop Mic' or Send when done.");
 
-    SpeechService.startListening(
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
+
+    await SpeechService.startRecording(
       (interim) => {
         // live interim transcript
       },
@@ -135,28 +147,59 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
         setTypedInput((prev) => (prev ? prev + " " + finalText : finalText));
       },
       (err) => {
-        console.warn("Speech recognition error:", err);
-        setIsListeningMic(false);
-      },
-      () => {
-        setIsListeningMic(false);
+        console.warn("Speech recognition notice:", err);
       }
     );
   };
 
-  const stopMicRecognition = () => {
-    SpeechService.stopListening();
+  const stopMicRecognition = async () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
     setIsListeningMic(false);
     if (aiStatus === 'listening') {
       setAiStatus('idle');
       setAiCaption("Mic stopped. Review your response and click 'Send'.");
     }
+
+    setIsTranscribing(true);
+    try {
+      const result = await SpeechService.stopRecording();
+      if (result.text && result.text.trim()) {
+        setTypedInput((prev) => {
+          if (!prev.includes(result.text)) {
+            return prev ? `${prev} ${result.text}` : result.text;
+          }
+          return prev;
+        });
+      } else if (result.audioBlob && result.audioBlob.size > 1000) {
+        setAiCaption("Transcribing speech with AI...");
+        const res = await transcribeAudio(
+          result.audioBlob,
+          config.provider,
+          config.api_key,
+          config.key_id
+        );
+        if (res.transcript && res.transcript.trim()) {
+          setTypedInput((prev) => (prev ? `${prev} ${res.transcript}` : res.transcript));
+          setAiCaption("Transcription complete. Review and click 'Send'.");
+        }
+      }
+    } catch (err) {
+      console.warn("Transcription error:", err);
+    } finally {
+      setIsTranscribing(false);
+    }
   };
 
   const handleUserResponse = async (text: string) => {
     if (!text.trim()) return;
-    stopMicRecognition();
+    if (isListeningMic) {
+      await stopMicRecognition();
+    }
     addMessage("user", text);
+    setTypedInput("");
     setAiStatus('thinking');
     setAiCaption("Evaluating your answer and structuring follow-up...");
 
@@ -168,12 +211,14 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
       config.resume_text,
       config.additional_context,
       config.provider,
-      config.api_key
+      config.api_key,
+      config.key_id
     );
 
     addMessage("assistant", reply);
     speakText(reply);
   };
+
 
   const addMessage = (role: 'assistant' | 'user', content: string) => {
     setChatMessages((prev) => [
@@ -256,50 +301,104 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
               </ul>
             </div>
 
-            {/* Mic / Type input */}
+            {/* Candidate Response Dock with Multi-line Textarea */}
             <div className="space-y-2 w-full">
-              <div className="flex items-center gap-2 w-full">
+              {/* Meta strip: STT status indicator */}
+              <div className="flex items-center justify-between text-[11px] px-1">
+                <div className="flex items-center gap-2">
+                  {isListeningMic && (
+                    <span className="inline-flex items-center gap-1.5 text-brand-red font-semibold animate-pulse">
+                      <span className="w-2 h-2 rounded-full bg-red-500" />
+                      Recording Voice ({recordingSeconds}s)... Speak clearly
+                    </span>
+                  )}
+                  {isTranscribing && (
+                    <span className="inline-flex items-center gap-1.5 text-brand-green font-semibold">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Transcribing speech with AI...
+                    </span>
+                  )}
+                  {!isListeningMic && !isTranscribing && (
+                    <span className="text-gray-500">
+                      {typedInput.trim() ? "Edit transcript before submitting response" : "Speak via mic or type your behavioral response"}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Textarea + Mic & Action dock */}
+              <div className="relative flex items-end gap-2 bg-white border border-gray-300 focus-within:border-brand-green focus-within:ring-2 focus-within:ring-brand-green/20 rounded-2xl p-2.5 shadow-sm transition-all">
                 <button
                   type="button"
                   onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
-                  className={`px-4 py-2 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                  disabled={isTranscribing}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                     isListeningMic
-                      ? "bg-red-500 text-white animate-pulse"
-                      : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 shadow-sm"
+                      ? "bg-red-600 hover:bg-red-700 text-white animate-pulse shadow-md"
+                      : "bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200"
                   }`}
+                  title={isListeningMic ? "Stop recording and transcribe" : "Click to speak using microphone"}
                 >
-                  {isListeningMic ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4 text-gray-400" />}
-                  <span>{isListeningMic ? "Mic Active (Stop)" : "Start Speaking"}</span>
+                  {isListeningMic ? (
+                    <>
+                      <Square className="w-3.5 h-3.5 fill-current" />
+                      <span>Stop Mic</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-3.5 h-3.5 text-brand-green" />
+                      <span>Start Speaking</span>
+                    </>
+                  )}
                 </button>
 
-                <input
-                  type="text"
+                <textarea
+                  rows={2}
                   value={typedInput}
                   onChange={(e) => setTypedInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && typedInput.trim()) {
+                    if (e.key === "Enter" && !e.shiftKey && typedInput.trim()) {
+                      e.preventDefault();
                       handleUserResponse(typedInput);
-                      setTypedInput("");
                     }
                   }}
-                  placeholder="Or type behavioral response..."
-                  className="flex-1 px-4 py-2 rounded-pill border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-green/30 bg-white"
+                  placeholder={
+                    isListeningMic
+                      ? "Listening to speech... your words will appear here"
+                      : "Explain your experience, leadership examples using STAR method, or ask questions..."
+                  }
+                  className="flex-1 bg-transparent text-xs text-gray-800 placeholder-gray-400 focus:outline-none resize-none leading-relaxed py-1"
                 />
+
+                {typedInput.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setTypedInput("")}
+                    className="p-2 text-gray-400 hover:text-red-500 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer shrink-0"
+                    title="Clear text"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
 
                 <button
                   type="button"
-                  disabled={!typedInput.trim()}
+                  disabled={!typedInput.trim() || isTranscribing}
                   onClick={() => {
                     if (typedInput.trim()) {
                       handleUserResponse(typedInput);
-                      setTypedInput("");
                     }
                   }}
-                  className="px-4 py-2 bg-brand-green hover:bg-[#009b4d] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-pill text-xs font-medium flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  className="px-4 py-2 bg-brand-green hover:bg-[#009b4d] disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0"
                 >
                   <span>Send</span>
                   <Send className="w-3.5 h-3.5" />
                 </button>
+              </div>
+
+              <div className="flex items-center justify-between text-[10px] text-gray-400 px-1">
+                <span>Press <kbd className="bg-gray-100 px-1 py-0.5 rounded border border-gray-200">Enter</kbd> to send, <kbd className="bg-gray-100 px-1 py-0.5 rounded border border-gray-200">Shift + Enter</kbd> for new line</span>
+                {typedInput.length > 0 && <span>{typedInput.length} characters</span>}
               </div>
 
               {/* Quick Skip Question Button */}
@@ -315,6 +414,7 @@ export const HRRoundScreen: React.FC<HRRoundScreenProps> = ({
                 </button>
               </div>
             </div>
+
           </div>
         </div>
 

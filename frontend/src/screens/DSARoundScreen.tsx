@@ -17,14 +17,17 @@ import {
   AlertCircle,
   SkipForward,
   HelpCircle,
-  Square
+  Square,
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { InterviewConfig, Question, ExecutionReport, CodeAnalysis, ChatMessage } from '../types';
-import { fetchCompanyQuestion, runCode, analyzeCode, sendInterviewChat } from '../services/api';
+import { fetchCompanyQuestion, runCode, analyzeCode, sendInterviewChat, transcribeAudio } from '../services/api';
 import { CameraFeed } from '../components/CameraFeed';
 import { VoiceOrb } from '../components/VoiceOrb';
 import { useTheme } from '../ThemeContext';
 import { SpeechService } from '../services/speechService';
+
 
 interface DSARoundScreenProps {
   roundName: string; // "DSA Round 1" or "DSA Round 2"
@@ -60,7 +63,11 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isListeningMic, setIsListeningMic] = useState(false);
   const [userInputText, setUserInputText] = useState("");
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingTimerRef = useRef<any>(null);
   const [isAnalyzingApproach, setIsAnalyzingApproach] = useState(false);
+
   const [codeAnalysis, setCodeAnalysis] = useState<CodeAnalysis | null>(null);
   const [showSkipModal, setShowSkipModal] = useState(false);
 
@@ -151,45 +158,88 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
     setAiCaption("Interrupted interviewer. You can speak or type your question/explanation now.");
   };
 
-  const startMicRecognition = () => {
+  const startMicRecognition = async () => {
     SpeechService.stopSpeaking();
     setIsListeningMic(true);
+    setRecordingSeconds(0);
     setAiStatus('listening');
-    setAiCaption("Listening to your voice... (Click 'Send' or 'Stop Mic' when done)");
+    setAiCaption("Listening to your voice... Speak your explanation or question.");
 
-    SpeechService.startListening(
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
+
+    await SpeechService.startRecording(
       (interim) => {
-        // live interim
+        // live interim transcript
       },
       (finalText) => {
         setUserInputText((prev) => (prev ? prev + " " + finalText : finalText));
       },
       (err) => {
-        console.warn("Speech recognition error", err);
-        setIsListeningMic(false);
-      },
-      () => {
-        setIsListeningMic(false);
+        console.warn("Speech recognition notice:", err);
       }
     );
   };
 
-  const stopMicRecognition = () => {
-    SpeechService.stopListening();
+  const stopMicRecognition = async () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
     setIsListeningMic(false);
     if (aiStatus === 'listening') {
       setAiStatus('idle');
-      setAiCaption("Mic stopped. Review your question and click 'Send'.");
+      setAiCaption("Mic stopped. Review your explanation and click 'Send'.");
+    }
+
+    setIsTranscribing(true);
+    try {
+      const result = await SpeechService.stopRecording();
+      if (result.text && result.text.trim()) {
+        setUserInputText((prev) => {
+          if (!prev.includes(result.text)) {
+            return prev ? `${prev} ${result.text}` : result.text;
+          }
+          return prev;
+        });
+      } else if (result.audioBlob && result.audioBlob.size > 1000) {
+        // Call backend transcription fallback (works seamlessly in Electron!)
+        setAiCaption("Transcribing speech with AI...");
+        const res = await transcribeAudio(
+          result.audioBlob,
+          config.provider,
+          config.api_key,
+          config.key_id
+        );
+        if (res.transcript && res.transcript.trim()) {
+          setUserInputText((prev) => (prev ? `${prev} ${res.transcript}` : res.transcript));
+          setAiCaption("Transcription complete. Review and click 'Send'.");
+        }
+      }
+    } catch (err) {
+      console.warn("Transcription error:", err);
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
   const handleUserSpokenMessage = async (text: string) => {
     if (!text.trim()) return;
+    if (isListeningMic) {
+      await stopMicRecognition();
+    }
     addMessage("user", text);
+    setUserInputText("");
     setAiStatus('thinking');
-    setAiCaption("AI is evaluating your input...");
+    setAiCaption("AI is evaluating your code, test results & explanation...");
 
-    // Send to agent for interview turn
+    const submissionStatus = execReport
+      ? (execReport.all_passed ? "all_tests_passed" : "tests_run")
+      : (code.trim().length > 30 ? "drafting_code" : "not_started");
+
+    // Send to agent for interview turn with complete context!
     const reply = await sendInterviewChat(
       'dsa_1',
       config.company,
@@ -198,7 +248,13 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
       config.resume_text,
       config.additional_context,
       config.provider,
-      config.api_key
+      config.api_key,
+      config.key_id,
+      question,
+      code,
+      language,
+      execReport,
+      submissionStatus
     );
 
     addMessage("assistant", reply);
@@ -220,24 +276,32 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   // 4. Request Hint from AI
   const handleRequestHint = async () => {
     if (!question) return;
+    const hintPrompt = `Candidate is asking for an algorithmic hint on problem "${question.title}". Current code status: ${execReport ? `${execReport.passed_cases}/${execReport.total_cases} tests passed` : 'Not tested yet'}. Please give a focused, 1-2 sentence hint about what approach, data structure, or boundary condition to look at.`;
     addMessage("user", "I'm a bit stuck on this problem. Could you provide a small hint or nudge in the right direction?");
     setAiStatus('thinking');
-    setAiCaption("AI interviewer is formulating a helpful hint...");
+    setAiCaption("AI interviewer is examining your code and formulating a helpful hint...");
 
     const reply = await sendInterviewChat(
       'dsa_1',
       config.company,
       config.role,
-      [...chatMessages, { id: 'usr-hint', role: 'user', content: `Candidate is stuck on problem: ${question.title}. Give a concise, 1-2 sentence algorithmic hint or suggest what data structure or edge case to look into, without writing out the complete code.`, timestamp: '' }],
+      [...chatMessages, { id: 'usr-hint', role: 'user', content: hintPrompt, timestamp: '' }],
       config.resume_text,
       config.additional_context,
       config.provider,
-      config.api_key
+      config.api_key,
+      config.key_id,
+      question,
+      code,
+      language,
+      execReport,
+      "hint_requested"
     );
 
     addMessage("assistant", reply);
     speakText(reply);
   };
+
 
   // 5. Run Code (Visible cases only)
   const handleRunCode = async () => {
@@ -570,9 +634,9 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
       </div>
 
       {/* Bottom Voice Dialog & Live Interviewer Console */}
-      <div className="bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-between shrink-0 shadow-lg">
+      <div className="bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-between shrink-0 shadow-lg gap-4">
         {/* Left: AI Voice Status & Orb */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <VoiceOrb status={aiStatus} size="sm" caption="" />
           <div>
             <div className="flex items-center gap-2">
@@ -581,7 +645,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
               </span>
               <span className="w-1.5 h-1.5 rounded-full bg-brand-green animate-ping" />
             </div>
-            <p className="text-xs text-gray-600 max-w-sm truncate">
+            <p className="text-xs text-gray-600 max-w-xs truncate">
               {aiCaption}
             </p>
           </div>
@@ -589,7 +653,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           {aiStatus === 'speaking' && (
             <button
               onClick={handleInterrupt}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-brand-red/10 text-brand-red border border-brand-red/30 hover:bg-brand-red/20 text-xs font-semibold transition-all shadow-sm cursor-pointer animate-pulse shrink-0 ml-2"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-brand-red/10 text-brand-red border border-brand-red/30 hover:bg-brand-red/20 text-xs font-semibold transition-all shadow-sm cursor-pointer animate-pulse shrink-0 ml-1"
               title="Interrupt interviewer and speak"
             >
               <Square className="w-3 h-3 fill-current" />
@@ -598,49 +662,128 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           )}
         </div>
 
-        {/* Center: Live Spoken Transcript Input, Mic Toggle, and Send Button */}
-        <div className="flex items-center gap-2 max-w-lg w-full">
-          <button
-            type="button"
-            onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
-            className={`px-3 py-1.5 rounded-pill text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-              isListeningMic
-                ? "bg-red-500 hover:bg-red-600 text-white animate-pulse"
-                : "bg-gray-100 hover:bg-gray-200 text-gray-800"
-            }`}
-          >
-            {isListeningMic ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5 text-gray-500" />}
-            <span>{isListeningMic ? "Mic Active (Stop)" : "Start Speaking"}</span>
-          </button>
+        {/* Center / Right: Expanded Candidate Response Dock with Multi-line Textarea */}
+        <div className="flex-1 max-w-2xl flex flex-col gap-1.5">
+          {/* Top meta strip: context tag + STT recording status */}
+          <div className="flex items-center justify-between text-[11px] px-1">
+            <div className="flex items-center gap-2">
+              {isListeningMic && (
+                <span className="inline-flex items-center gap-1.5 text-brand-red font-semibold animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                  Recording Voice ({recordingSeconds}s)... Speak clearly
+                </span>
+              )}
+              {isTranscribing && (
+                <span className="inline-flex items-center gap-1.5 text-brand-blue font-semibold">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Transcribing your audio with AI...
+                </span>
+              )}
+              {!isListeningMic && !isTranscribing && (
+                <span className="text-gray-400">
+                  {userInputText.trim() ? "Edit transcript before sending" : "Speak via mic or type your explanation / questions"}
+                </span>
+              )}
+            </div>
 
-          <input
-            type="text"
-            value={userInputText}
-            onChange={(e) => setUserInputText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && userInputText.trim()) {
-                handleUserSpokenMessage(userInputText);
-                setUserInputText("");
-              }
-            }}
-            placeholder="Speak or type explanation to interviewer..."
-            className="flex-1 px-3 py-1.5 rounded-pill border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-          />
+            {/* Test Status Indicator Badge (shows AI is aware of real execution) */}
+            {execReport && (
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                  execReport.all_passed
+                    ? "bg-green-100 text-green-800 border border-green-200"
+                    : execReport.compilation_error
+                    ? "bg-red-100 text-red-800 border border-red-200"
+                    : "bg-amber-100 text-amber-800 border border-amber-200"
+                }`}
+              >
+                {execReport.all_passed
+                  ? "✓ Tests: All Passed (AI Aware)"
+                  : execReport.compilation_error
+                  ? "⚠️ Error in Code (AI Aware)"
+                  : `Tests: ${execReport.passed_cases}/${execReport.total_cases} Passed (AI Aware)`}
+              </span>
+            )}
+          </div>
 
-          <button
-            type="button"
-            disabled={!userInputText.trim()}
-            onClick={() => {
-              if (userInputText.trim()) {
-                handleUserSpokenMessage(userInputText);
-                setUserInputText("");
+          {/* Response Box with Mic and Action Controls */}
+          <div className="relative flex items-end gap-2 bg-gray-50 border border-gray-300 focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/20 rounded-2xl p-2 transition-all">
+            {/* Mic Toggle Button */}
+            <button
+              type="button"
+              onClick={isListeningMic ? stopMicRecognition : startMicRecognition}
+              disabled={isTranscribing}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                isListeningMic
+                  ? "bg-red-600 hover:bg-red-700 text-white animate-pulse shadow-md"
+                  : "bg-white hover:bg-gray-100 text-gray-800 border border-gray-200 shadow-sm"
+              }`}
+              title={isListeningMic ? "Stop recording and transcribe" : "Click to speak using microphone"}
+            >
+              {isListeningMic ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <span>Stop Mic</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-3.5 h-3.5 text-brand-blue" />
+                  <span>Start Speaking</span>
+                </>
+              )}
+            </button>
+
+            {/* Multi-line Textarea */}
+            <textarea
+              rows={2}
+              value={userInputText}
+              onChange={(e) => setUserInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && userInputText.trim()) {
+                  e.preventDefault();
+                  handleUserSpokenMessage(userInputText);
+                }
+              }}
+              placeholder={
+                isListeningMic
+                  ? "Listening to speech... your words will appear here"
+                  : "Explain your logic, time complexity, or ask the interviewer questions..."
               }
-            }}
-            className="px-3.5 py-1.5 bg-brand-blue hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-pill text-xs font-medium flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0"
-          >
-            <span>Send</span>
-            <Send className="w-3.5 h-3.5" />
-          </button>
+              className="flex-1 bg-transparent text-xs text-gray-800 placeholder-gray-400 focus:outline-none resize-none leading-relaxed py-1"
+            />
+
+            {/* Clear Button */}
+            {userInputText.trim() && (
+              <button
+                type="button"
+                onClick={() => setUserInputText("")}
+                className="p-2 text-gray-400 hover:text-red-500 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer shrink-0"
+                title="Clear text"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Send Button */}
+            <button
+              type="button"
+              disabled={!userInputText.trim() || isTranscribing}
+              onClick={() => {
+                if (userInputText.trim()) {
+                  handleUserSpokenMessage(userInputText);
+                }
+              }}
+              className="px-4 py-2 bg-brand-blue hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-md transition-all cursor-pointer shrink-0"
+            >
+              <span>Send</span>
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-gray-400 px-1">
+            <span>Press <kbd className="bg-gray-100 px-1 py-0.5 rounded border border-gray-200">Enter</kbd> to send, <kbd className="bg-gray-100 px-1 py-0.5 rounded border border-gray-200">Shift + Enter</kbd> for new line</span>
+            {userInputText.length > 0 && <span>{userInputText.length} characters</span>}
+          </div>
         </div>
       </div>
 
