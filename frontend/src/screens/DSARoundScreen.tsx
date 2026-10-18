@@ -22,6 +22,7 @@ import { InterviewConfig, Question, ExecutionReport, CodeAnalysis, ChatMessage }
 import { fetchCompanyQuestion, runCode, analyzeCode, sendInterviewChat } from '../services/api';
 import { CameraFeed } from '../components/CameraFeed';
 import { VoiceOrb } from '../components/VoiceOrb';
+import { useTheme } from '../ThemeContext';
 
 interface DSARoundScreenProps {
   roundName: string; // "DSA Round 1" or "DSA Round 2"
@@ -36,6 +37,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   onComplete,
   onSkip,
 }) => {
+  const { theme } = useTheme();
   const [question, setQuestion] = useState<Question | null>(null);
   const [language, setLanguage] = useState<'python' | 'cpp' | 'java'>('python');
   const [code, setCode] = useState("");
@@ -473,7 +475,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
               height="100%"
               language={language === 'cpp' ? 'cpp' : language}
               value={code}
-              theme="vs-dark"
+              theme={theme === 'dark' ? 'vs-dark' : 'vs'}
               onChange={(val) => setCode(val || "")}
               options={{
                 fontSize: 13,

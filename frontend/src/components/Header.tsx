@@ -1,5 +1,6 @@
 import React from 'react';
-import { ShieldCheck, Sparkles, Terminal } from 'lucide-react';
+import { Moon, ShieldCheck, Sparkles, Sun, Terminal } from 'lucide-react';
+import { useTheme } from '../ThemeContext';
 
 interface HeaderProps {
   currentRound?: string;
@@ -12,6 +13,9 @@ export const Header: React.FC<HeaderProps> = ({
   isProctoringActive = false,
   warningsCount = 0,
 }) => {
+  const { theme, toggleTheme } = useTheme();
+  const themeAction = theme === 'light' ? 'Dark' : 'Light';
+
   return (
     <header className="sticky top-0 z-30 w-full bg-white/90 backdrop-blur-md border-b border-[#EBEBEB] px-6 py-3.5 flex items-center justify-between">
       {/* Brand Logo & Name */}
@@ -58,6 +62,15 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls: Proctoring Shield & Warnings */}
       <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={`Switch to ${themeAction} Mode`}
+          title={`Switch to ${themeAction} Mode`}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
+        >
+          {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+        </button>
         {isProctoringActive && (
           <div className="flex items-center gap-2">
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium border ${

@@ -91,7 +91,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({
                 cx="80"
                 cy="80"
                 r={radius}
-                stroke="#EAEAEA"
+                stroke="var(--border-color)"
                 strokeWidth="12"
                 fill="transparent"
               />
