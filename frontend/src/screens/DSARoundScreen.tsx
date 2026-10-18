@@ -37,6 +37,69 @@ interface DSARoundScreenProps {
   onSkip: () => void;
 }
 
+interface ResizeHandleProps {
+  axis: 'x' | 'y';
+  value: number;
+  reverse?: boolean;
+  label: string;
+  onChange: (value: number) => void;
+}
+
+const ResizeHandle: React.FC<ResizeHandleProps> = ({
+  axis,
+  value,
+  reverse = false,
+  label,
+  onChange,
+}) => {
+  const updatePosition = (event: React.PointerEvent<HTMLDivElement>) => {
+    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!bounds) return;
+
+    const offset = axis === 'x' ? event.clientX - bounds.left : event.clientY - bounds.top;
+    const size = axis === 'x' ? bounds.width : bounds.height;
+    const percent = (offset / size) * 100;
+    onChange(Math.max(15, Math.min(85, reverse ? 100 - percent : percent)));
+  };
+
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      aria-orientation={axis === 'x' ? 'vertical' : 'horizontal'}
+      aria-valuenow={Math.round(value)}
+      tabIndex={0}
+      className={`group relative z-10 shrink-0 touch-none ${
+        axis === 'x' ? 'w-1.5 cursor-col-resize' : 'h-1.5 cursor-row-resize'
+      }`}
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        updatePosition(event);
+      }}
+      onPointerMove={(event) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) updatePosition(event);
+      }}
+      onKeyDown={(event) => {
+        const direction = axis === 'x'
+          ? (event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0)
+          : (event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0);
+        if (direction) {
+          event.preventDefault();
+          onChange(Math.max(15, Math.min(85, value + direction * (reverse ? -2 : 2))));
+        }
+      }}
+    >
+      <div
+        className={`absolute rounded-full bg-gray-300 transition-colors group-hover:bg-brand-blue group-focus-visible:bg-brand-blue ${
+          axis === 'x'
+            ? 'inset-y-0 left-1/2 w-px -translate-x-1/2'
+            : 'inset-x-0 top-1/2 h-px -translate-y-1/2'
+        }`}
+      />
+    </div>
+  );
+};
+
 export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   roundName,
   config,
@@ -61,6 +124,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [isGreetingPhase, setIsGreetingPhase] = useState(true);
   const [aiStatus, setAiStatus] = useState<'idle' | 'listening' | 'speaking' | 'thinking'>('speaking');
   const [aiCaption, setAiCaption] = useState("Interviewer is introducing the problem...");
+  const aiCaptionRef = useRef<HTMLParagraphElement>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isListeningMic, setIsListeningMic] = useState(false);
   const [userInputText, setUserInputText] = useState("");
@@ -68,6 +132,11 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const recordingTimerRef = useRef<any>(null);
   const [isAnalyzingApproach, setIsAnalyzingApproach] = useState(false);
+  const responseTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [problemPanePercent, setProblemPanePercent] = useState(42);
+  const [testPanePercent, setTestPanePercent] = useState(30);
+  const [mainAreaPercent, setMainAreaPercent] = useState(74);
+  const [interviewerPanePercent, setInterviewerPanePercent] = useState(38);
 
   const [codeAnalysis, setCodeAnalysis] = useState<CodeAnalysis | null>(null);
   const [showSkipModal, setShowSkipModal] = useState(false);
@@ -75,6 +144,33 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   const speechRecognitionRef = useRef<any>(null);
   const hasStartedRef = useRef<boolean>(false);
   const isSendingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const caption = aiCaptionRef.current;
+    if (caption) caption.scrollTop = caption.scrollHeight;
+  }, [aiCaption]);
+
+  useEffect(() => {
+    const textarea = responseTextareaRef.current;
+    if (!textarea) return;
+
+    const maxHeight = 144;
+    textarea.style.height = 'auto';
+    const contentHeight = textarea.scrollHeight;
+    textarea.style.height = `${Math.min(contentHeight, maxHeight)}px`;
+    textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
+    textarea.scrollTop = textarea.scrollHeight;
+  }, [userInputText]);
+
+  const compactPrompt = (text: string) => {
+    const question = text.match(/[^.!?]*\?/g)?.at(-1)?.trim() || text.trim();
+    const prompt = question
+      .replace(/^(?:could you|can you|would you|please)\s+/i, '')
+      .replace(/[?!.]+$/, '')
+      .trim();
+    const normalized = prompt ? prompt[0].toUpperCase() + prompt.slice(1) : "Ready for questions";
+    return normalized.length > 72 ? `${normalized.slice(0, 69).trimEnd()}...` : normalized;
+  };
 
   // 1. Fetch Company Question (guarded against duplicate execution)
   useEffect(() => {
@@ -88,7 +184,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
 
       // Welcome voice message
       const greeting = `Welcome ${config.candidate_name} to your ${roundName} for ${config.company}. You have 25 minutes to review the problem and submit an optimal solution. Feel free to explain your approach aloud as you code.`;
-      speakText(greeting);
+      speakText(greeting, "Review the problem");
       addMessage("assistant", greeting);
     }
     init();
@@ -119,7 +215,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   }, [isRunning]);
 
   const handleTimeExpired = () => {
-    speakText("Time is up for this coding problem. Let's move on to analyzing your approach.");
+    speakText("Time is up for this coding problem. Let's move on to analyzing your approach.", "Review your approach");
     handleSubmission(false);
   };
 
@@ -138,23 +234,23 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
   }, []);
 
   // 3. SpeechService (TTS & STT with push-to-talk & interruption)
-  const speakText = (text: string) => {
+  const speakText = (text: string, finishedCaption = compactPrompt(text)) => {
     setAiStatus('speaking');
     setAiCaption(text);
     SpeechService.speak(
       text,
       () => {
         setAiStatus('speaking');
-        setAiCaption(text);
       },
       () => {
         setAiStatus('idle');
-        setAiCaption("AI Interviewer is observing. Feel free to ask questions or discuss your approach.");
+        setAiCaption(finishedCaption);
       },
       () => {
         setAiStatus('idle');
-        setAiCaption("Ready for questions or discussion.");
-      }
+        setAiCaption(finishedCaption);
+      },
+      setAiCaption
     );
   };
 
@@ -359,10 +455,11 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
       setCodeAnalysis(analysis);
 
       const passMsg = `Submission processed. You passed ${fullReport.passed_cases} out of ${fullReport.total_cases} test cases.`;
+      const followUp = analysis.follow_up_questions[0] || "Can you explain your complexity trade-offs?";
       if (speakConfirmation) {
-        speakText(passMsg + " " + (analysis.follow_up_questions[0] || "Can you explain your complexity trade-offs?"));
+        speakText(`${passMsg} ${followUp}`, compactPrompt(followUp));
       }
-      addMessage("assistant", passMsg + " Let's discuss your approach: " + (analysis.follow_up_questions[0] || ""));
+      addMessage("assistant", passMsg + " Let's discuss your approach: " + followUp);
     } catch (err) {
       console.error("Submission failed", err);
     } finally {
@@ -439,11 +536,18 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
         </div>
       </div>
 
-      {/* Main Split: Left (LeetCode Question) | Right (Monaco Editor & Test Cases) */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 flex-col overflow-hidden">
+      {/* Main Split: Problem | Editor and Test Cases */}
+      <div
+        className="flex min-h-0 overflow-hidden"
+        style={{ flex: `0 0 calc(${mainAreaPercent}% - 3px)` }}
+      >
         
         {/* Left Pane: Question Description (LeetCode Style) */}
-        <div className="w-5/12 bg-white border-r border-gray-200 flex flex-col overflow-y-auto p-6">
+        <div
+          className="min-w-0 bg-white flex flex-col overflow-y-auto p-6"
+          style={{ flex: `0 0 ${problemPanePercent}%` }}
+        >
           {question ? (
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -497,8 +601,15 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           )}
         </div>
 
+        <ResizeHandle
+          axis="x"
+          value={problemPanePercent}
+          label="Resize problem and editor panels"
+          onChange={(percent) => setProblemPanePercent(Math.max(25, Math.min(60, percent)))}
+        />
+
         {/* Right Pane: Monaco Editor & Test Cases */}
-        <div className="w-7/12 flex flex-col bg-[#1C1C1E] overflow-hidden">
+        <div className="min-w-0 flex-1 flex flex-col bg-[#1C1C1E] overflow-hidden">
           
           {/* Editor Header: Language Switcher */}
           <div className="bg-[#1C1C1E] border-b border-gray-800 px-4 py-2 flex items-center justify-between shrink-0">
@@ -540,7 +651,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           </div>
 
           {/* Monaco Editor */}
-          <div className="flex-1 overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <Editor
               height="100%"
               language={language === 'cpp' ? 'cpp' : language}
@@ -560,7 +671,17 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           </div>
 
           {/* Test Cases Panel */}
-          <div className="h-48 bg-[#18181A] border-t border-gray-800 flex flex-col shrink-0 text-white">
+          <ResizeHandle
+            axis="y"
+            value={testPanePercent}
+            reverse
+            label="Resize editor and test cases panels"
+            onChange={(percent) => setTestPanePercent(Math.max(15, Math.min(65, percent)))}
+          />
+          <div
+            className="min-h-20 bg-[#18181A] flex flex-col shrink-0 text-white"
+            style={{ flex: `0 0 ${testPanePercent}%` }}
+          >
             {/* Test Case Tabs */}
             <div className="flex items-center gap-1 px-3 pt-2 bg-[#141416] border-b border-gray-800 overflow-x-auto">
               {Array.from({ length: 10 }).map((_, idx) => {
@@ -647,10 +768,20 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
         </div>
       </div>
 
+      <ResizeHandle
+        axis="y"
+        value={mainAreaPercent}
+        label="Resize workspace and voice panels"
+        onChange={(percent) => setMainAreaPercent(Math.max(35, Math.min(85, percent)))}
+      />
+
       {/* Bottom Voice Dialog & Live Interviewer Console */}
-      <div className="bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-between shrink-0 shadow-lg gap-4">
+      <div className="min-h-24 flex-1 min-w-0 flex overflow-hidden bg-white shadow-lg">
         {/* Left: AI Voice Status & Orb */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div
+          className="min-w-0 flex items-center gap-3 px-4 py-3 overflow-hidden"
+          style={{ flex: `0 0 ${interviewerPanePercent}%` }}
+        >
           <VoiceOrb status={aiStatus} size="sm" caption="" />
           <div>
             <div className="flex items-center gap-2">
@@ -659,7 +790,10 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
               </span>
               <span className="w-1.5 h-1.5 rounded-full bg-brand-green animate-ping" />
             </div>
-            <p className="text-xs text-gray-600 max-w-xs truncate">
+            <p
+              ref={aiCaptionRef}
+              className="text-xs text-gray-600 max-w-xs max-h-12 overflow-y-auto whitespace-normal break-words"
+            >
               {aiCaption}
             </p>
           </div>
@@ -676,8 +810,15 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
           )}
         </div>
 
+        <ResizeHandle
+          axis="x"
+          value={interviewerPanePercent}
+          label="Resize interviewer and response panels"
+          onChange={(percent) => setInterviewerPanePercent(Math.max(25, Math.min(55, percent)))}
+        />
+
         {/* Center / Right: Expanded Candidate Response Dock with Multi-line Textarea */}
-        <div className="flex-1 max-w-2xl flex flex-col gap-1.5">
+        <div className="min-w-0 flex-1 flex flex-col justify-center gap-1.5 px-4 py-2">
           {/* Top meta strip: context tag + STT recording status */}
           <div className="flex items-center justify-between text-[11px] px-1">
             <div className="flex items-center gap-2">
@@ -749,6 +890,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
 
             {/* Multi-line Textarea */}
             <textarea
+              ref={responseTextareaRef}
               rows={2}
               value={userInputText}
               onChange={(e) => setUserInputText(e.target.value)}
@@ -799,6 +941,7 @@ export const DSARoundScreen: React.FC<DSARoundScreenProps> = ({
             {userInputText.length > 0 && <span>{userInputText.length} characters</span>}
           </div>
         </div>
+      </div>
       </div>
 
       {/* Skip Round Confirmation Modal */}
