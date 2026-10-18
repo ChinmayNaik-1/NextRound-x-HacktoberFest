@@ -10,7 +10,27 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 let mainWindow;
 let backendProcess;
 
-function startBackend() {
+/** Check if the backend is already serving on port 8000. */
+function isBackendAlreadyRunning() {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:8000/api/health', (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(600, () => { req.destroy(); resolve(false); });
+  });
+}
+
+async function startBackend() {
+  // If a backend is already running (e.g. from a previous dev session or hot-reload),
+  // reuse it instead of spawning a second one which would fail with EADDRINUSE.
+  const alreadyUp = await isBackendAlreadyRunning();
+  if (alreadyUp) {
+    console.log('[Electron] Reusing existing backend on port 8000.');
+    return;
+  }
+
   const isWindows = process.platform === 'win32';
   const pythonPath = isWindows
     ? path.join(__dirname, '..', '..', 'backend', 'venv', 'Scripts', 'python.exe')
@@ -25,16 +45,16 @@ function startBackend() {
     });
 
     backendProcess.on('error', (err) => {
-      console.warn('Backend process error:', err);
+      console.warn('[Electron] Backend process error:', err);
     });
 
     backendProcess.on('exit', (code) => {
       if (code !== 0 && code !== null) {
-        console.warn(`Backend exited with code ${code}`);
+        console.warn(`[Electron] Backend exited with code ${code}`);
       }
     });
   } catch (err) {
-    console.warn('Could not launch backend subprocess automatically:', err);
+    console.warn('[Electron] Could not launch backend subprocess:', err);
   }
 }
 
@@ -50,7 +70,7 @@ function waitForBackend(maxWaitMs = 12000, intervalMs = 500) {
         } else {
           retry();
         }
-        res.resume(); // drain the response
+        res.resume();
       });
       req.on('error', retry);
       req.setTimeout(400, () => { req.destroy(); retry(); });
@@ -132,7 +152,7 @@ app.whenReady().then(async () => {
     }
   }
 
-  startBackend();
+  await startBackend();
   // Wait for backend to be healthy before opening the window (up to 12s)
   await waitForBackend(12000, 500);
   createWindow();
