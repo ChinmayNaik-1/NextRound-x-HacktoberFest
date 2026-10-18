@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -15,7 +16,19 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Settings table (for saved API keys & preferences)
+    # Named API Keys table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            is_active INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # Settings table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -36,6 +49,7 @@ def init_db():
             dob TEXT,
             status TEXT,
             selected_rounds TEXT,
+            completed_rounds TEXT,
             resume_text TEXT,
             additional_context TEXT,
             scores TEXT,
@@ -43,36 +57,94 @@ def init_db():
             transcripts TEXT
         )
     """)
+    # Safe column migrations
+    cursor.execute("PRAGMA table_info(interviews)")
+    existing_cols = [c[1] for c in cursor.fetchall()]
+    if "completed_rounds" not in existing_cols:
+        cursor.execute("ALTER TABLE interviews ADD COLUMN completed_rounds TEXT")
     
     conn.commit()
     conn.close()
 
-def save_setting(key: str, value: str):
+# ----------------- Named API Keys -----------------
+
+def add_api_key(name: str, provider: str, api_key: str, make_active: bool = True) -> Dict[str, Any]:
     conn = get_connection()
     cursor = conn.cursor()
+    key_id = str(uuid.uuid4())[:8]
+    
+    if make_active:
+        cursor.execute("UPDATE api_keys SET is_active = 0")
+        
     cursor.execute("""
-        INSERT INTO settings (key, value, updated_at) 
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    """, (key, value))
+        INSERT INTO api_keys (id, name, provider, api_key, is_active)
+        VALUES (?, ?, ?, ?, ?)
+    """, (key_id, name.strip(), provider.lower().strip(), api_key.strip(), 1 if make_active else 0))
+    
     conn.commit()
     conn.close()
+    return {"id": key_id, "name": name, "provider": provider}
 
-def get_setting(key: str) -> Optional[str]:
+def list_api_keys() -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = cursor.fetchone()
-    conn.close()
-    return row["value"] if row else None
-
-def get_all_settings() -> Dict[str, str]:
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT key, value FROM settings")
+    cursor.execute("SELECT id, name, provider, api_key, is_active, created_at FROM api_keys ORDER BY created_at DESC")
     rows = cursor.fetchall()
     conn.close()
-    return {row["key"]: row["value"] for row in rows}
+    
+    result = []
+    for r in rows:
+        raw_key = r["api_key"]
+        masked = raw_key[:6] + "..." + raw_key[-4:] if len(raw_key) > 10 else "****"
+        result.append({
+            "id": r["id"],
+            "name": r["name"],
+            "provider": r["provider"],
+            "masked_key": masked,
+            "is_active": bool(r["is_active"]),
+            "created_at": r["created_at"]
+        })
+    return result
+
+def get_api_key_by_id(key_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM api_keys WHERE id = ?", (key_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def set_active_api_key(key_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE api_keys SET is_active = 0")
+    cursor.execute("UPDATE api_keys SET is_active = 1 WHERE id = ?", (key_id,))
+    changed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+def get_active_api_key() -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM api_keys WHERE is_active = 1 LIMIT 1")
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute("SELECT * FROM api_keys ORDER BY created_at DESC LIMIT 1")
+        row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def delete_api_key(key_id: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM api_keys WHERE id = ?", (key_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+# ----------------- Interviews History -----------------
 
 def save_interview(interview_data: Dict[str, Any]):
     conn = get_connection()
@@ -80,8 +152,8 @@ def save_interview(interview_data: Dict[str, Any]):
     cursor.execute("""
         INSERT OR REPLACE INTO interviews (
             id, company, role, difficulty, candidate_name, dob, status, 
-            selected_rounds, resume_text, additional_context, scores, feedback, transcripts
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            selected_rounds, completed_rounds, resume_text, additional_context, scores, feedback, transcripts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         interview_data.get("id"),
         interview_data.get("company"),
@@ -91,6 +163,7 @@ def save_interview(interview_data: Dict[str, Any]):
         interview_data.get("dob"),
         interview_data.get("status", "in_progress"),
         json.dumps(interview_data.get("selected_rounds", [])),
+        json.dumps(interview_data.get("completed_rounds", [])),
         interview_data.get("resume_text", ""),
         interview_data.get("additional_context", ""),
         json.dumps(interview_data.get("scores", {})),
@@ -110,6 +183,7 @@ def get_interview(interview_id: str) -> Optional[Dict[str, Any]]:
         return None
     data = dict(row)
     data["selected_rounds"] = json.loads(data["selected_rounds"] or "[]")
+    data["completed_rounds"] = json.loads(data["completed_rounds"] or "[]")
     data["scores"] = json.loads(data["scores"] or "{}")
     data["feedback"] = json.loads(data["feedback"] or "{}")
     data["transcripts"] = json.loads(data["transcripts"] or "[]")

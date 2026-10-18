@@ -1,15 +1,107 @@
-# Dependencies
+# ==========================================
+# Dependencies & Package Managers
+# ==========================================
 node_modules/
 backend/venv/
+venv/
+.venv/
+env/
+ENV/
 
-# Build artifacts
+# ==========================================
+# Environment Variables & Secrets (Keep Safe!)
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ==========================================
+# Databases & Local App State
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
+backend/interviewai.db
+
+# ==========================================
+# Python Artifacts & Caches
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+
+# ==========================================
+# Frontend, Vite & Electron Builds
+# ==========================================
+frontend/dist/
+frontend/dist-ssr/
 dist/
 dist-electron/
-*.pyc
-__pycache__/
-*.db
-.tmp/
+release/
+.vite/
+*.local
 
-# OS files
-Thumbs.db
+# ==========================================
+# Compiled Binaries (C++, Java, Runners)
+# ==========================================
+*.exe
+*.o
+*.obj
+*.class
+*.out
+*.dll
+*.dylib
+
+# ==========================================
+# Logs & Diagnostic Outputs
+# ==========================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================================
+# Automated Test Run Artifacts
+# ==========================================
+test-results/
+playwright-report/
+blob-report/
+
+# ==========================================
+# Operating System & IDE Files
+# ==========================================
 .DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.user
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

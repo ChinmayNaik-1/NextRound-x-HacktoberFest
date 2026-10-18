@@ -1,29 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  Sparkles,
   Building2,
-  Briefcase,
   FileText,
   Key,
-  CheckCircle2,
   ChevronRight,
   Upload,
-  Cpu,
   Layers,
-  HelpCircle,
-  Clock
+  Clock,
+  ArrowLeft
 } from 'lucide-react';
-import { InterviewConfig, RoundType } from '../types';
-import {
-  fetchSavedKeys,
-  saveApiKey,
-  parseResumePdf,
-  parseResumeText,
-  fetchRawKey
-} from '../services/api';
+import { InterviewConfig, RoundType, NamedKey } from '../types';
+import { parseResumePdf, parseResumeText } from '../services/api';
 import { ParticleCanvas } from '../components/ParticleCanvas';
+import { PermissionsCheckModal } from './PermissionsCheckModal';
 
 interface SetupScreenProps {
+  initialKey: NamedKey | null;
+  onBackToLanding: () => void;
   onStart: (config: InterviewConfig) => void;
 }
 
@@ -37,14 +30,18 @@ const POPULAR_ROLES = [
   "Backend & Distributed Systems"
 ];
 
-export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
+export const SetupScreen: React.FC<SetupScreenProps> = ({
+  initialKey,
+  onBackToLanding,
+  onStart
+}) => {
   const [candidateName, setCandidateName] = useState("Alex");
   const [dob, setDob] = useState("");
   const [company, setCompany] = useState("Google");
   const [role, setRole] = useState("Software Engineer (SDE I/II)");
   const [difficulty, setDifficulty] = useState<'Easy' | 'Medium' | 'Hard' | 'Brutal'>('Medium');
   
-  // Rounds
+  // Rounds Selection
   const [selectedRounds, setSelectedRounds] = useState<RoundType[]>([
     'dsa_1',
     'technical',
@@ -56,58 +53,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
   const [detectedSkills, setDetectedSkills] = useState<string[]>([]);
   const [isParsingResume, setIsParsingResume] = useState(false);
   const [resumeFileName, setResumeFileName] = useState("");
-  
-  // LLM Provider & Key
-  const [provider, setProvider] = useState<'gemini' | 'openai' | 'groq' | 'anthropic'>('gemini');
-  const [apiKey, setApiKey] = useState("");
-  const [savedKeys, setSavedKeys] = useState<Record<string, string>>({});
-  const [useSavedKey, setUseSavedKey] = useState(false);
-  const [rememberKey, setRememberKey] = useState(true);
-  const [keyTestStatus, setKeyTestStatus] = useState<string | null>(null);
 
   // Additional instructions
   const [additionalContext, setAdditionalContext] = useState(
-    "Maintain a realistic, rigorous technical interview bar. Ask probing follow-ups on performance bottlenecks and design trade-offs."
+    "Maintain a realistic technical bar. Ask probing follow-ups on performance bottlenecks and edge cases."
   );
 
-  // Load saved keys from SQLite backend
-  useEffect(() => {
-    async function loadKeys() {
-      const data = await fetchSavedKeys();
-      setSavedKeys(data.saved_keys);
-      if (data.saved_keys[provider]) {
-        setUseSavedKey(true);
-      }
-    }
-    loadKeys();
-  }, [provider]);
-
-  // Handle switching to saved key
-  const handleUseSavedKeyToggle = async (checked: boolean) => {
-    setUseSavedKey(checked);
-    if (checked) {
-      const raw = await fetchRawKey(provider);
-      setApiKey(raw);
-      setKeyTestStatus("Saved key loaded from secure local store.");
-    } else {
-      setApiKey("");
-      setKeyTestStatus(null);
-    }
-  };
-
-  const handleTestKey = async () => {
-    if (!apiKey) {
-      setKeyTestStatus("Please enter an API key to test.");
-      return;
-    }
-    setKeyTestStatus("Testing connection to LLM...");
-    setTimeout(() => {
-      setKeyTestStatus("Connection verified successfully! Ready for interview.");
-      if (rememberKey) {
-        saveApiKey(provider, apiKey);
-      }
-    }, 600);
-  };
+  // Hardware permission modal state
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -143,10 +96,11 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (rememberKey && apiKey && !useSavedKey) {
-      saveApiKey(provider, apiKey);
-    }
+    setShowPermissionsModal(true);
+  };
 
+  const handlePermissionsConfirmed = () => {
+    setShowPermissionsModal(false);
     onStart({
       candidate_name: candidateName,
       dob,
@@ -157,58 +111,72 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
       resume_text: resumeText,
       detected_skills: detectedSkills,
       additional_context: additionalContext,
-      provider,
-      api_key: apiKey,
-      remember_key: rememberKey
+      provider: initialKey ? initialKey.provider : 'gemini',
+      api_key: "",
+      key_id: initialKey ? initialKey.id : undefined,
+      remember_key: true
     });
   };
 
   return (
-    <div className="relative min-h-screen bg-white text-[#1A1A1A] pb-20">
-      {/* Antigravity particles background */}
-      <ParticleCanvas count={100} />
+    <div className="relative min-h-screen bg-white text-[#1A1A1A] pb-20 select-text">
+      {/* Antigravity background particles */}
+      <ParticleCanvas count={90} />
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-12">
-        {/* Antigravity Brand Hero */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 bg-[#F8F9FA] border border-[#E5E7EB] px-4 py-1.5 rounded-pill text-xs font-medium text-gray-700 mb-4 shadow-sm">
-            <span className="w-2 h-2 rounded-full bg-brand-blue animate-pulse" />
-            Local Open-Source Desktop Platform
+      <div className="relative z-10 max-w-4xl mx-auto px-6 pt-8 space-y-6">
+        
+        {/* Navigation Breadcrumb / Back button */}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={onBackToLanding}
+            className="btn-secondary text-xs px-3.5 py-1.5 flex items-center gap-1.5"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Back to API Keys & History</span>
+          </button>
+
+          <div className="text-xs text-gray-500 font-mono bg-gray-50 border border-gray-200 px-3 py-1 rounded-pill">
+            Key: <strong className="text-gray-800">{initialKey ? initialKey.name : "Default Gemini"}</strong>
           </div>
-          <h1 className="text-4xl md:text-5xl font-medium tracking-tight text-[#1A1A1A] mb-3">
-            Experience liftoff with your next-gen interview
+        </div>
+
+        {/* Header */}
+        <div className="text-center space-y-1">
+          <h1 className="text-3xl font-medium tracking-tight text-[#1A1A1A]">
+            Configure Your Interview Session
           </h1>
-          <p className="text-base text-gray-500 max-w-xl mx-auto">
-            Configurable 1-to-1 voice interviews with LeetCode-style DSA coding, resume-grounded technical deep dives, and behavioral assessment.
+          <p className="text-xs text-gray-500">
+            Tailor the company question bank, target seniority bar, and rounds to practice.
           </p>
         </div>
 
-        {/* Main Configuration Card */}
-        <form onSubmit={handleSubmit} className="bg-white rounded-card border border-[#E0E0E0] shadow-card p-8 md:p-10 space-y-8">
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="bg-white rounded-card border border-[#E0E0E0] shadow-card p-6 md:p-8 space-y-6">
           
-          {/* Section 1: Candidate & Target Role */}
-          <div>
-            <h2 className="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-brand-blue" />
+          {/* Section 1: Candidate & Company */}
+          <div className="space-y-4">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-brand-blue" />
               1. Candidate & Target Company
             </h2>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
                   Candidate Name
                 </label>
                 <input
                   type="text"
                   value={candidateName}
                   onChange={(e) => setCandidateName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 focus:border-brand-blue text-sm"
-                  placeholder="e.g. Alex Chen"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5 flex items-center justify-between">
+                <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center justify-between">
                   <span>Date of Birth</span>
                   <span className="text-gray-400 font-normal">Optional</span>
                 </label>
@@ -216,12 +184,12 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
                   type="date"
                   value={dob}
                   onChange={(e) => setDob(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 focus:border-brand-blue text-sm text-gray-600"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
                   Target Company
                 </label>
                 <input
@@ -229,8 +197,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
                   list="companies-list"
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 focus:border-brand-blue text-sm"
-                  placeholder="Google, Amazon, Meta..."
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
                   required
                 />
                 <datalist id="companies-list">
@@ -241,7 +208,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
                   Target Role
                 </label>
                 <input
@@ -249,8 +216,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
                   list="roles-list"
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 focus:border-brand-blue text-sm"
-                  placeholder="e.g. Software Engineer (SDE II)"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
                   required
                 />
                 <datalist id="roles-list">
@@ -262,9 +228,9 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
             </div>
 
             {/* Difficulty Selector */}
-            <div className="mt-4">
-              <label className="block text-xs font-medium text-gray-700 mb-2">
-                Interview Difficulty Bar
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Target Difficulty Bar
               </label>
               <div className="grid grid-cols-4 gap-2">
                 {(['Easy', 'Medium', 'Hard', 'Brutal'] as const).map((diff) => (
@@ -272,7 +238,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
                     type="button"
                     key={diff}
                     onClick={() => setDifficulty(diff)}
-                    className={`py-2 px-3 text-xs font-medium rounded-lg border transition-all text-center ${
+                    className={`py-1.5 px-3 text-xs font-medium rounded-lg border transition-all text-center ${
                       difficulty === diff
                         ? "bg-[#1A1A1A] text-white border-[#1A1A1A] shadow-sm"
                         : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
@@ -288,104 +254,101 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
           <hr className="border-gray-100" />
 
           {/* Section 2: Round Selection */}
-          <div>
-            <h2 className="text-lg font-medium text-gray-900 mb-2 flex items-center gap-2">
-              <Layers className="w-5 h-5 text-brand-green" />
-              2. Interview Rounds Configuration
+          <div className="space-y-3">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-brand-green" />
+              2. Rounds to Include (Only selected rounds will be scored)
             </h2>
-            <p className="text-xs text-gray-500 mb-4">
-              Select which rounds to include. You can also skip or end any round during the live interview.
-            </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* DSA Round 1 */}
-              <label className={`p-4 rounded-xl border flex items-start gap-3.5 cursor-pointer transition-all ${
+              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 selectedRounds.includes('dsa_1')
-                  ? "bg-[#EBF3FF] border-[#3186FF] text-gray-900"
+                  ? "bg-[#EBF3FF] border-[#3186FF]"
                   : "bg-white border-gray-200 hover:border-gray-300"
               }`}>
                 <input
                   type="checkbox"
                   checked={selectedRounds.includes('dsa_1')}
                   onChange={() => toggleRound('dsa_1')}
-                  className="mt-1 w-4 h-4 text-brand-blue rounded border-gray-300 focus:ring-brand-blue"
+                  className="mt-1 w-4 h-4 text-brand-blue rounded"
                 />
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-900">DSA Round 1</span>
-                    <span className="text-[11px] bg-brand-blue text-white px-2 py-0.2 rounded-full font-mono">25 mins</span>
+                    <span className="text-xs font-semibold text-gray-900">DSA Round 1</span>
+                    <span className="text-[10px] bg-brand-blue text-white px-2 py-0.5 rounded-full font-mono">25 mins</span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    2 min greeting, Monaco code editor (Python, C++, Java), 10 test cases (5 open, 5 hidden), and post-submission approach Q&A.
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Monaco editor, 10 real test cases (5 open, 5 hidden), and AI approach Q&A.
                   </p>
                 </div>
               </label>
 
               {/* Extra DSA Round 2 */}
-              <label className={`p-4 rounded-xl border flex items-start gap-3.5 cursor-pointer transition-all ${
+              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 selectedRounds.includes('dsa_2')
-                  ? "bg-[#EBF3FF] border-[#3186FF] text-gray-900"
+                  ? "bg-[#EBF3FF] border-[#3186FF]"
                   : "bg-white border-gray-200 hover:border-gray-300"
               }`}>
                 <input
                   type="checkbox"
                   checked={selectedRounds.includes('dsa_2')}
                   onChange={() => toggleRound('dsa_2')}
-                  className="mt-1 w-4 h-4 text-brand-blue rounded border-gray-300 focus:ring-brand-blue"
+                  className="mt-1 w-4 h-4 text-brand-blue rounded"
                 />
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-900">DSA Round 2 (Optional)</span>
-                    <span className="text-[11px] bg-gray-200 text-gray-700 px-2 py-0.2 rounded-full font-mono">25 mins</span>
+                    <span className="text-xs font-semibold text-gray-900">DSA Round 2 (Optional)</span>
+                    <span className="text-[10px] bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full font-mono">25 mins</span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    An extra algorithmic coding round with a second company-tagged problem.
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    An extra algorithmic coding round with an additional problem.
                   </p>
                 </div>
               </label>
 
               {/* Technical Round */}
-              <label className={`p-4 rounded-xl border flex items-start gap-3.5 cursor-pointer transition-all ${
+              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 selectedRounds.includes('technical')
-                  ? "bg-[#FFF0F0] border-[#FC413D] text-gray-900"
+                  ? "bg-[#FFF0F0] border-[#FC413D]"
                   : "bg-white border-gray-200 hover:border-gray-300"
               }`}>
                 <input
                   type="checkbox"
                   checked={selectedRounds.includes('technical')}
                   onChange={() => toggleRound('technical')}
-                  className="mt-1 w-4 h-4 text-brand-red rounded border-gray-300 focus:ring-brand-red"
+                  className="mt-1 w-4 h-4 text-brand-red rounded"
                 />
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-900">Technical Round</span>
-                    <span className="text-[11px] bg-brand-red text-white px-2 py-0.2 rounded-full font-mono">40 mins</span>
+                    <span className="text-xs font-semibold text-gray-900">Technical Round</span>
+                    <span className="text-[10px] bg-brand-red text-white px-2 py-0.5 rounded-full font-mono">40 mins</span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Voice interview probing your resume projects, system design, and CS / AI fundamentals.
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Voice interview probing your projects, architecture, and CS/AI fundamentals.
                   </p>
                 </div>
               </label>
 
               {/* HR Round */}
-              <label className={`p-4 rounded-xl border flex items-start gap-3.5 cursor-pointer transition-all ${
+              <label className={`p-3.5 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${
                 selectedRounds.includes('hr')
-                  ? "bg-[#EAFAF1] border-[#00B95C] text-gray-900"
+                  ? "bg-[#EAFAF1] border-[#00B95C]"
                   : "bg-white border-gray-200 hover:border-gray-300"
               }`}>
                 <input
                   type="checkbox"
                   checked={selectedRounds.includes('hr')}
                   onChange={() => toggleRound('hr')}
-                  className="mt-1 w-4 h-4 text-brand-green rounded border-gray-300 focus:ring-brand-green"
+                  className="mt-1 w-4 h-4 text-brand-green rounded"
                 />
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-900">HR Round</span>
-                    <span className="text-[11px] bg-brand-green text-white px-2 py-0.2 rounded-full font-mono">20 mins</span>
+                    <span className="text-xs font-semibold text-gray-900">HR Round</span>
+                    <span className="text-[10px] bg-brand-green text-white px-2 py-0.5 rounded-full font-mono">20 mins</span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Voice interview on behavioral questions (STAR format), leadership principles, and cultural fit.
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Behavioral questions, culture fit, and leadership principles (STAR format).
                   </p>
                 </div>
               </label>
@@ -395,22 +358,19 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
           <hr className="border-gray-100" />
 
           {/* Section 3: Resume Parser */}
-          <div>
-            <h2 className="text-lg font-medium text-gray-900 mb-2 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-brand-purple" />
-              3. Candidate Resume (PDF or Text)
+          <div className="space-y-3">
+            <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <FileText className="w-4 h-4 text-brand-purple" />
+              3. Candidate Resume (PDF or Plain Text)
             </h2>
-            <p className="text-xs text-gray-500 mb-3">
-              The interviewer uses your resume to formulate personalized project and architecture questions.
-            </p>
 
-            <div className="flex flex-col md:flex-row gap-4 items-start">
-              <label className="flex-1 w-full border-2 border-dashed border-gray-300 hover:border-brand-blue rounded-xl p-6 text-center cursor-pointer transition-colors bg-[#FAFAFA] flex flex-col items-center justify-center">
-                <Upload className="w-7 h-7 text-gray-400 mb-2" />
+            <div className="flex flex-col md:flex-row gap-3">
+              <label className="flex-1 border-2 border-dashed border-gray-300 hover:border-brand-blue rounded-xl p-5 text-center cursor-pointer transition-colors bg-[#FAFAFA] flex flex-col items-center justify-center">
+                <Upload className="w-6 h-6 text-gray-400 mb-1" />
                 <span className="text-xs font-semibold text-gray-700">
-                  {resumeFileName || "Upload PDF or Word Resume"}
+                  {resumeFileName || "Upload Resume (PDF / TXT)"}
                 </span>
-                <span className="text-[11px] text-gray-400 mt-1">Click or drag & drop</span>
+                <span className="text-[10px] text-gray-400 mt-0.5">Click or drag & drop</span>
                 <input
                   type="file"
                   accept=".pdf,.txt"
@@ -419,25 +379,24 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
                 />
               </label>
 
-              <div className="flex-1 w-full">
+              <div className="flex-1">
                 <textarea
                   value={resumeText}
                   onChange={(e) => setResumeText(e.target.value)}
-                  placeholder="Or paste resume text here (Projects, skills, experience)..."
-                  rows={4}
-                  className="w-full p-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 text-xs font-mono text-gray-700 leading-relaxed"
+                  placeholder="Or paste resume text here (projects, skills, experience)..."
+                  rows={3}
+                  className="w-full p-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 text-xs font-mono text-gray-700 leading-relaxed"
                 />
               </div>
             </div>
 
-            {/* Detected Skills Chips */}
             {detectedSkills.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5 items-center">
-                <span className="text-[11px] font-medium text-gray-500 mr-1">Parsed Skills:</span>
+              <div className="flex flex-wrap gap-1.5 items-center pt-1">
+                <span className="text-[11px] text-gray-500 font-medium">Parsed Skills:</span>
                 {detectedSkills.map((sk) => (
                   <span
                     key={sk}
-                    className="text-[11px] bg-blue-50 text-brand-blue border border-blue-200 px-2 py-0.5 rounded-pill font-medium"
+                    className="text-[10px] bg-blue-50 text-brand-blue border border-blue-200 px-2 py-0.5 rounded-pill font-medium"
                   >
                     {sk}
                   </span>
@@ -448,124 +407,45 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ onStart }) => {
 
           <hr className="border-gray-100" />
 
-          {/* Section 4: LLM Model & API Key Configuration */}
+          {/* Section 4: Additional Context */}
           <div>
-            <h2 className="text-lg font-medium text-gray-900 mb-2 flex items-center gap-2">
-              <Key className="w-5 h-5 text-brand-yellow" />
-              4. LLM Intelligence & API Key
-            </h2>
-            <p className="text-xs text-gray-500 mb-4">
-              Select your AI model provider. <strong>Default is Gemma / Gemini</strong>. You can enter an API key or use previously saved credentials.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                  LLM Provider
-                </label>
-                <select
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value as any)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-                >
-                  <option value="gemini">Google Gemini / Gemma (Recommended)</option>
-                  <option value="openai">OpenAI (GPT-4o)</option>
-                  <option value="groq">Groq (Llama 3.3 Fast)</option>
-                  <option value="anthropic">Anthropic (Claude 3.5)</option>
-                </select>
-              </div>
-
-              <div className="md:col-span-2">
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-gray-700">
-                    API Key for {provider.toUpperCase()}
-                  </label>
-                  {savedKeys[provider] && (
-                    <label className="flex items-center gap-1.5 text-xs text-brand-blue cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useSavedKey}
-                        onChange={(e) => handleUseSavedKeyToggle(e.target.checked)}
-                        className="w-3.5 h-3.5 rounded text-brand-blue"
-                      />
-                      <span>Use saved key ({savedKeys[provider]})</span>
-                    </label>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={apiKey}
-                    disabled={useSavedKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={useSavedKey ? "Using saved local API key" : "Paste your API key here (Optional for offline demo)"}
-                    className="flex-1 px-3.5 py-2.5 rounded-lg border border-gray-300 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-blue/30 disabled:bg-gray-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleTestKey}
-                    className="btn-secondary text-xs px-3.5 py-2"
-                  >
-                    Test Key
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={rememberKey}
-                  onChange={(e) => setRememberKey(e.target.checked)}
-                  className="w-3.5 h-3.5 text-brand-blue rounded"
-                />
-                <span>Remember API key locally on this device (stored in local SQLite)</span>
-              </label>
-
-              {keyTestStatus && (
-                <span className="text-xs text-brand-green font-medium flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  {keyTestStatus}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <hr className="border-gray-100" />
-
-          {/* Section 5: Additional Context to AI */}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              Additional Context / Instructions for Interviewer
+            <label className="block text-xs font-medium text-gray-700 mb-1">
+              Additional Context for AI Interviewer
             </label>
             <input
               type="text"
               value={additionalContext}
               onChange={(e) => setAdditionalContext(e.target.value)}
-              placeholder="e.g. Keep the interview very strict; probe heavily on edge cases; be supportive..."
-              className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 text-xs text-gray-700"
+              placeholder="e.g. Keep it strict on edge cases; be encouraging; focus on system design..."
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
             />
           </div>
 
-          {/* Start CTA */}
-          <div className="pt-4 flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="text-xs text-gray-500 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-gray-400" />
-              <span>Full screen anti-cheat guard will activate when you begin.</span>
-            </div>
+          {/* Submit CTA */}
+          <div className="pt-2 flex items-center justify-between">
+            <span className="text-xs text-gray-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              Hardware & full-screen check will appear next
+            </span>
 
             <button
               type="submit"
-              className="w-full md:w-auto btn-primary text-base px-8 py-3.5 shadow-md flex items-center justify-center gap-2"
+              className="btn-primary text-xs px-6 py-2.5 flex items-center gap-1.5 shadow-sm"
             >
-              <span>Start Interview</span>
-              <ChevronRight className="w-4 h-4" />
+              <span>Next: Hardware & Permissions Check</span>
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </form>
       </div>
+
+      {/* Permissions & Camera Check Modal */}
+      {showPermissionsModal && (
+        <PermissionsCheckModal
+          onProceed={handlePermissionsConfirmed}
+          onCancel={() => setShowPermissionsModal(false)}
+        />
+      )}
     </div>
   );
 };

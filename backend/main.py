@@ -7,17 +7,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from services.db import (
-    init_db, save_setting, get_setting, get_all_settings,
+    init_db, add_api_key, list_api_keys, get_api_key_by_id,
+    set_active_api_key, get_active_api_key, delete_api_key,
     save_interview, get_interview, list_past_interviews
 )
 from services.question_bank import get_question_for_company, QUESTIONS_DB
 from services.code_runner import execute_code
 from services.resume_parser import parse_pdf_resume, summarize_resume
-from services.ai_agent import AIAgent
+from services.ai_agent import AIAgent, verify_provider_api_key
 
 app = FastAPI(title="InterviewAI Backend", version="1.0.0")
 
-# Enable CORS for local Electron and Vite apps
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,37 +34,58 @@ def on_startup():
 def health_check():
     return {"status": "ok", "service": "InterviewAI Backend", "version": "1.0.0"}
 
-# ==================== Settings & API Keys ====================
+# ==================== Named API Keys Endpoints ====================
 
-class SaveKeyRequest(BaseModel):
+class AddKeyRequest(BaseModel):
+    name: str
+    provider: str
+    api_key: str
+    verify: Optional[bool] = True
+
+@app.get("/api/keys")
+def get_all_keys():
+    keys = list_api_keys()
+    active = get_active_api_key()
+    return {"keys": keys, "active_key_id": active["id"] if active else None}
+
+@app.post("/api/keys")
+def create_key(req: AddKeyRequest):
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Key name is required.")
+    if not req.api_key.strip():
+        raise HTTPException(status_code=400, detail="API key is required.")
+        
+    # Optional verification
+    if req.verify:
+        v_res = verify_provider_api_key(req.provider, req.api_key)
+        if not v_res["valid"]:
+            raise HTTPException(status_code=400, detail=v_res["message"])
+
+    key_record = add_api_key(req.name, req.provider, req.api_key, make_active=True)
+    return {"status": "success", "key": key_record, "message": f"API key '{req.name}' added successfully."}
+
+class VerifyKeyRequest(BaseModel):
     provider: str
     api_key: str
 
-@app.get("/api/settings/keys")
-def get_saved_keys():
-    settings = get_all_settings()
-    masked = {}
-    for k, v in settings.items():
-        if k.startswith("api_key_") and v:
-            # Mask key e.g. "AIzaSy...ABCD"
-            if len(v) > 8:
-                masked[k.replace("api_key_", "")] = v[:6] + "..." + v[-4:]
-            else:
-                masked[k.replace("api_key_", "")] = "****"
-    last_provider = settings.get("active_provider", "gemini")
-    return {"saved_keys": masked, "active_provider": last_provider}
+@app.post("/api/keys/verify")
+def verify_key_endpoint(req: VerifyKeyRequest):
+    res = verify_provider_api_key(req.provider, req.api_key)
+    return res
 
-@app.post("/api/settings/keys")
-def save_key(req: SaveKeyRequest):
-    provider = req.provider.lower()
-    save_setting(f"api_key_{provider}", req.api_key)
-    save_setting("active_provider", provider)
-    return {"status": "success", "message": f"API key for {provider} saved successfully."}
+@app.post("/api/keys/{key_id}/activate")
+def activate_key(key_id: str):
+    ok = set_active_api_key(key_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"status": "success", "message": "Key activated."}
 
-@app.get("/api/settings/raw-key/{provider}")
-def get_raw_key(provider: str):
-    k = get_setting(f"api_key_{provider.lower()}")
-    return {"provider": provider, "api_key": k or ""}
+@app.delete("/api/keys/{key_id}")
+def remove_key(key_id: str):
+    ok = delete_api_key(key_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"status": "success", "message": "Key deleted."}
 
 # ==================== Questions ====================
 
@@ -73,11 +94,7 @@ def get_company_question(company: str = "Google", difficulty: str = "Medium"):
     q = get_question_for_company(company, difficulty)
     return q
 
-@app.get("/api/questions/all")
-def get_all_questions():
-    return QUESTIONS_DB
-
-# ==================== Code Execution ====================
+# ==================== Real Code Execution ====================
 
 class CodeRunRequest(BaseModel):
     language: str
@@ -100,11 +117,21 @@ class CodeAnalyzeRequest(BaseModel):
     execution_results: Dict[str, Any]
     provider: Optional[str] = "gemini"
     api_key: Optional[str] = None
+    key_id: Optional[str] = None
 
 @app.post("/api/code/analyze")
 def analyze_code_endpoint(req: CodeAnalyzeRequest):
-    effective_key = req.api_key or get_setting(f"api_key_{(req.provider or 'gemini').lower()}")
-    agent = AIAgent(provider=req.provider, api_key=effective_key)
+    key = req.api_key
+    if not key and req.key_id:
+        k_record = get_api_key_by_id(req.key_id)
+        if k_record:
+            key = k_record["api_key"]
+    if not key:
+        active = get_active_api_key()
+        if active:
+            key = active["api_key"]
+
+    agent = AIAgent(provider=req.provider, api_key=key)
     analysis = agent.analyze_dsa_code(req.question, req.code, req.language, req.execution_results)
     return analysis
 
@@ -136,6 +163,7 @@ class StartInterviewRequest(BaseModel):
     additional_context: Optional[str] = ""
     provider: Optional[str] = "gemini"
     api_key: Optional[str] = ""
+    key_id: Optional[str] = ""
 
 @app.post("/api/interview/start")
 def start_interview_session(req: StartInterviewRequest):
@@ -148,6 +176,7 @@ def start_interview_session(req: StartInterviewRequest):
         "role": req.role,
         "difficulty": req.difficulty,
         "selected_rounds": req.selected_rounds,
+        "completed_rounds": [],
         "resume_text": req.resume_text,
         "additional_context": req.additional_context,
         "status": "in_progress",
@@ -167,11 +196,21 @@ class ChatTurnRequest(BaseModel):
     additional_context: Optional[str] = ""
     provider: Optional[str] = "gemini"
     api_key: Optional[str] = ""
+    key_id: Optional[str] = ""
 
 @app.post("/api/interview/chat")
 def interview_chat_endpoint(req: ChatTurnRequest):
-    effective_key = req.api_key or get_setting(f"api_key_{(req.provider or 'gemini').lower()}")
-    agent = AIAgent(provider=req.provider, api_key=effective_key)
+    key = req.api_key
+    if not key and req.key_id:
+        k_record = get_api_key_by_id(req.key_id)
+        if k_record:
+            key = k_record["api_key"]
+    if not key:
+        active = get_active_api_key()
+        if active:
+            key = active["api_key"]
+
+    agent = AIAgent(provider=req.provider, api_key=key)
     ai_reply = agent.chat_interviewer(
         round_type=req.round_type,
         company=req.company,
@@ -187,20 +226,28 @@ class FinishInterviewRequest(BaseModel):
     interview_data: Dict[str, Any]
     provider: Optional[str] = "gemini"
     api_key: Optional[str] = ""
+    key_id: Optional[str] = ""
 
 @app.post("/api/interview/finish")
 def finish_interview_session(req: FinishInterviewRequest):
-    effective_key = req.api_key or get_setting(f"api_key_{(req.provider or 'gemini').lower()}")
-    agent = AIAgent(provider=req.provider, api_key=effective_key)
+    key = req.api_key
+    if not key and req.key_id:
+        k_record = get_api_key_by_id(req.key_id)
+        if k_record:
+            key = k_record["api_key"]
+    if not key:
+        active = get_active_api_key()
+        if active:
+            key = active["api_key"]
+
+    agent = AIAgent(provider=req.provider, api_key=key)
     report = agent.generate_final_report(req.interview_data)
     
-    # Save back to database
     interview_record = req.interview_data
     interview_record["id"] = req.session_id
     interview_record["status"] = "completed"
     interview_record["scores"] = report
     save_interview(interview_record)
-    
     return {"status": "completed", "report": report}
 
 @app.get("/api/interview/history")

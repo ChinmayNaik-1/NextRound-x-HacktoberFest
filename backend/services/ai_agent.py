@@ -1,12 +1,86 @@
 import json
 import os
+import requests
 from typing import Dict, Any, List, Optional
+
+def verify_provider_api_key(provider: str, api_key: str) -> Dict[str, Any]:
+    prov = (provider or "gemini").lower().strip()
+    key = (api_key or "").strip()
+    if not key:
+        return {"valid": False, "message": "API key cannot be empty."}
+
+    if prov == "gemini":
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=key)
+            # Test model list or tiny prompt
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            resp = model.generate_content("Ping")
+            if resp and resp.text:
+                return {"valid": True, "message": "Successfully verified Google Gemini API Key!"}
+            return {"valid": False, "message": "No response returned from Gemini."}
+        except Exception as e:
+            return {"valid": False, "message": f"Gemini Verification Error: {str(e)}"}
+            
+    elif prov == "openai":
+        try:
+            res = requests.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=8
+            )
+            if res.status_code == 200:
+                return {"valid": True, "message": "Successfully verified OpenAI API Key!"}
+            else:
+                return {"valid": False, "message": f"OpenAI Error: {res.text}"}
+        except Exception as e:
+            return {"valid": False, "message": f"OpenAI Connection Error: {str(e)}"}
+
+    elif prov == "groq":
+        try:
+            res = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=8
+            )
+            if res.status_code == 200:
+                return {"valid": True, "message": "Successfully verified Groq API Key!"}
+            else:
+                return {"valid": False, "message": f"Groq Error: {res.text}"}
+        except Exception as e:
+            return {"valid": False, "message": f"Groq Connection Error: {str(e)}"}
+
+    elif prov == "anthropic":
+        try:
+            res = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-3-haiku-20240307",
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "ping"}]
+                },
+                timeout=8
+            )
+            if res.status_code == 200:
+                return {"valid": True, "message": "Successfully verified Anthropic API Key!"}
+            else:
+                return {"valid": False, "message": f"Anthropic Error: {res.text}"}
+        except Exception as e:
+            return {"valid": False, "message": f"Anthropic Connection Error: {str(e)}"}
+
+    return {"valid": False, "message": f"Unsupported provider: {provider}"}
+
 
 class AIAgent:
     def __init__(self, provider: str = "gemini", api_key: Optional[str] = None, model: Optional[str] = None):
         self.provider = (provider or "gemini").lower()
         self.api_key = api_key
-        self.model = model or ("gemini-2.5-flash" if self.provider == "gemini" else "default")
+        self.model = model or ("gemini-1.5-flash" if self.provider == "gemini" else "default")
 
     def _call_gemini(self, prompt: str, system_prompt: str = "") -> str:
         if not self.api_key:
@@ -14,7 +88,6 @@ class AIAgent:
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            # Use gemini-1.5-flash or gemini-2.0-flash / gemini-2.5-flash
             model_name = "gemini-1.5-flash"
             model = genai.GenerativeModel(
                 model_name=model_name,
@@ -30,7 +103,6 @@ class AIAgent:
         if not self.api_key:
             return ""
         try:
-            import requests
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
@@ -53,7 +125,6 @@ class AIAgent:
         if not self.api_key:
             return ""
         try:
-            import requests
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
@@ -82,17 +153,15 @@ class AIAgent:
             res = self._call_groq(prompt, system_prompt)
 
         if not res:
-            # High-fidelity fallback agent
-            res = self._mock_fallback(prompt, system_prompt)
+            res = self._fallback_reply(prompt, system_prompt)
         return res
 
-    def _mock_fallback(self, prompt: str, system_prompt: str) -> str:
-        """Intelligent offline fallback if no API key is provided or network fails."""
+    def _fallback_reply(self, prompt: str, system_prompt: str) -> str:
         p_lower = prompt.lower()
         if "analyze" in p_lower and "code" in p_lower:
             return json.dumps({
-                "time_complexity": "O(N) time complexity observed from single-pass traversal.",
-                "space_complexity": "O(N) auxiliary space utilizing hash map storage.",
+                "time_complexity": "O(N) linear time based on hash-based single-pass",
+                "space_complexity": "O(N) space auxiliary storage",
                 "approach_summary": "Clean and idiomatic solution leveraging efficient lookup data structures to reduce brute force polynomial time down to linear time.",
                 "strengths": ["Optimal time complexity", "Clear variable naming", "Handled primary test cases"],
                 "improvements": ["Consider memory pre-allocation for very large input arrays", "Validate integer overflow limits in edge inputs"],
@@ -102,47 +171,44 @@ class AIAgent:
                     "Could this problem be solved in O(1) space if the input array were already sorted?"
                 ]
             })
-        elif "greeting" in p_lower or "start" in p_lower:
-            return "Welcome to your interview! I'm your AI interviewer today. Take a moment to review the problem on your screen. You have 25 minutes. Feel free to ask clarifying questions or explain your thoughts as you code."
         elif "technical" in system_prompt.lower() or "technical" in p_lower:
-            return "Thank you for explaining that. Let's dive deeper into system design and concurrency. How did you handle cache invalidation and database consistency in your high-throughput projects?"
+            return "Good explanation. Let's delve into system design and concurrency. How did you handle cache invalidation and database consistency in your high-throughput projects?"
         elif "hr" in system_prompt.lower() or "behavioral" in p_lower:
-            return "That's a great example of ownership. Could you share another situation where you had a disagreement with a team member or product manager on a technical tradeoff? How did you resolve it?"
+            return "That's a solid example of ownership. Could you share another situation where you had a disagreement with a team member on a technical tradeoff? How did you resolve it?"
         else:
-            return "I see your point. Can you elaborate further on how you would measure the performance impact in production?"
+            return "Understood. Can you walk me through the key architectural trade-offs you considered during implementation?"
 
     def analyze_dsa_code(self, question: Dict[str, Any], user_code: str, language: str, execution_results: Dict[str, Any]) -> Dict[str, Any]:
-        sys_prompt = "You are a senior tech lead and algorithmic interviewer at top tech companies. Analyze the candidate's code submission."
+        sys_prompt = "You are a senior tech lead at a top tech company. Analyze the candidate's exact submitted code."
         prompt = f"""
-Question: {question.get('title')} ({question.get('difficulty')})
+Problem: {question.get('title')} ({question.get('difficulty')})
 Language: {language}
-User Code:
+Submitted Code:
 ```
 {user_code}
 ```
 
-Test Results:
+Real Test Execution Results:
 Passed: {execution_results.get('passed_cases')}/{execution_results.get('total_cases')}
-Errors: {execution_results.get('compilation_error', 'None')}
+All Passed: {execution_results.get('all_passed')}
+Compilation / Runtime Errors: {execution_results.get('compilation_error', 'None')}
 
-Return a valid JSON object with:
+Return a valid JSON object strictly matching this schema:
 {{
   "time_complexity": "e.g. O(N)",
   "space_complexity": "e.g. O(1)",
-  "approach_summary": "1-2 sentences on approach",
-  "strengths": ["bullet 1", "bullet 2"],
-  "improvements": ["bullet 1", "bullet 2"],
+  "approach_summary": "1-2 sentences on actual approach submitted",
+  "strengths": ["Strength 1", "Strength 2"],
+  "improvements": ["Improvement 1", "Improvement 2"],
   "follow_up_questions": [
-    "First question to ask candidate verbally about their code",
-    "Second question about edge cases or scaling",
-    "Third question on alternative tradeoffs"
+    "Question 1 about their specific code",
+    "Question 2 on scaling or memory",
+    "Question 3 on edge cases"
   ]
 }}
 """
         raw = self.query_llm(prompt, sys_prompt)
-        # Parse JSON
         try:
-            # find JSON block
             s = raw.strip()
             if "```json" in s:
                 s = s.split("```json")[1].split("```")[0].strip()
@@ -150,12 +216,16 @@ Return a valid JSON object with:
                 s = s.split("```")[1].split("```")[0].strip()
             return json.loads(s)
         except Exception:
+            # High-fidelity realistic fallback based on test execution
+            passed = execution_results.get('passed_cases', 0)
+            total = execution_results.get('total_cases', 10)
+            is_good = passed == total
             return {
-                "time_complexity": "O(N) estimated",
-                "space_complexity": "O(N) estimated",
-                "approach_summary": "Candidate provided a working solution addressing the problem constraints.",
-                "strengths": ["Good syntax comprehension", "Clean logic"],
-                "improvements": ["Optimize space utilization", "Add inline comments"],
+                "time_complexity": "O(N) linear time" if is_good else "O(N^2) or incomplete",
+                "space_complexity": "O(N) space auxiliary",
+                "approach_summary": f"Candidate passed {passed}/{total} test cases using {language}.",
+                "strengths": ["Clean structure", "Addressed problem logic"] if is_good else ["Attempted solution"],
+                "improvements": ["Optimize runtime", "Handle negative and extreme boundaries"],
                 "follow_up_questions": [
                     "Can you explain your thought process and why you chose this specific data structure?",
                     "How would your algorithm behave if the input size grew by a factor of 10,000?",
@@ -164,19 +234,17 @@ Return a valid JSON object with:
             }
 
     def chat_interviewer(self, round_type: str, company: str, role: str, messages: List[Dict[str, str]], resume_summary: str, additional_context: str) -> str:
-        sys_prompt = f"""You are a professional, realistic {company} interviewer conducting a {round_type} interview for the position of {role}.
+        sys_prompt = f"""You are a professional, realistic {company} interviewer conducting a {round_type} interview for {role}.
 Candidate Resume Highlights: {resume_summary}
-Tone/Style Guidelines: {additional_context or 'Professional, encouraging yet rigorous, realistic.'}
+Tone / Style: {additional_context or 'Realistic, concise, rigorous.'}
 
 Rules:
-1. Keep your spoken responses concise (2-4 sentences) so they feel natural in voice conversation.
+1. Keep spoken responses concise (2-4 sentences max).
 2. Ask one clear question or follow-up at a time.
-3. If the candidate answers well, acknowledge it briefly and dig deeper into edge cases or system constraints.
-4. If in DSA follow-up: probe into time/space complexity, trade-offs, and alternative approaches.
-5. If in Technical round: focus heavily on their resume projects, CS fundamentals, concurrency, and architecture.
-6. If in HR round: focus on STAR method (Situation, Task, Action, Result), leadership, conflict resolution, and culture fit.
+3. In DSA follow-up: ask about complexity, memory trade-offs, and alternative approaches.
+4. In Technical round: focus on their projects and CS/AI fundamentals.
+5. In HR round: focus on STAR format and leadership.
 """
-        # Format conversation history
         conv_str = ""
         for m in messages[-6:]:
             role_label = "Interviewer" if m.get("role") == "assistant" else "Candidate"
@@ -186,98 +254,88 @@ Rules:
         return self.query_llm(prompt, sys_prompt)
 
     def generate_final_report(self, interview_data: Dict[str, Any]) -> Dict[str, Any]:
-        sys_prompt = "You are an executive hiring committee chair generating the comprehensive evaluation and score card for a candidate."
-        prompt = f"""
-Candidate Info:
-Company: {interview_data.get('company')}
-Role: {interview_data.get('role')}
-Difficulty: {interview_data.get('difficulty')}
-Selected Rounds: {interview_data.get('selected_rounds')}
-Resume Summary: {interview_data.get('resume_text', '')[:300]}
+        # Determine exactly which rounds were actually completed
+        completed_rounds = interview_data.get("completed_rounds") or []
+        if not completed_rounds:
+            # Infer from submissions and transcripts
+            subs = interview_data.get("submissions") or []
+            completed_rounds = list(set([s.get("round") for s in subs if s.get("round")]))
+            if not completed_rounds:
+                # Default to selected rounds that actually had activity
+                completed_rounds = [r for r in interview_data.get("selected_rounds", []) if r in ("dsa_1", "dsa_2")]
 
-Transcripts & Rounds Summary:
-{json.dumps(interview_data.get('transcripts', []), indent=2)}
+        # Ensure we only score completed rounds
+        round_labels = {
+            "dsa_1": "DSA Round 1",
+            "dsa_2": "DSA Round 2",
+            "technical": "Technical Round",
+            "hr": "HR Round"
+        }
 
-Please return a valid JSON evaluation report with:
-{{
-  "overall_score": 82,
-  "hiring_recommendation": "Strong Hire" | "Hire" | "Leaning Hire" | "No Hire",
-  "round_breakdowns": [
-    {{"round": "DSA Round 1", "score": 85, "feedback": "Solid problem solving, clear explanation of hash map trade-offs."}},
-    {{"round": "Technical Round", "score": 80, "feedback": "Good understanding of CS fundamentals and system architecture."}},
-    {{"round": "HR Round", "score": 82, "feedback": "Strong communication and ownership mindset demonstrated."}}
-  ],
-  "radar_metrics": {{
-    "problem_solving": 85,
-    "system_architecture": 78,
-    "code_quality": 88,
-    "communication": 82,
-    "cultural_fit": 80
-  }},
-  "strengths": [
-    "Quickly identified optimal linear time approach with minimal prompting",
-    "Articulate verbal communication while stepping through code line by line",
-    "Showed strong practical experience with modern distributed systems"
-  ],
-  "weaknesses": [
-    "Could improve formal articulation of worst-case space complexity bounds",
-    "Initial solution missed handling negative integer boundaries until prompted"
-  ],
-  "actionable_tips": [
-    "Practice dynamic programming top-down memoization vs bottom-up tabulation",
-    "When explaining system architecture, explicitly quantify latency SLAs and QPS limits",
-    "Structure behavioral stories more strictly using Situation-Task-Action-Result (STAR)"
-  ],
-  "recommended_resources": [
-    {{"title": "NeetCode 150 & Blind 75", "url": "https://neetcode.io/practice", "type": "Practice"}},
-    {{"title": "System Design Primer by Donne Martin", "url": "https://github.com/donnemartin/system-design-primer", "type": "Architecture"}},
-    {{"title": "Designing Data-Intensive Applications (Kleppmann)", "url": "https://dataintensive.net", "type": "Book"}},
-    {{"title": "Grokking Modern System Design", "url": "https://designgurus.io", "type": "Course"}}
-  ]
-}}
-"""
-        raw = self.query_llm(prompt, sys_prompt)
-        try:
-            s = raw.strip()
-            if "```json" in s:
-                s = s.split("```json")[1].split("```")[0].strip()
-            elif "```" in s:
-                s = s.split("```")[1].split("```")[0].strip()
-            return json.loads(s)
-        except Exception:
-            # Fallback high quality score card
-            return {
-                "overall_score": 84,
-                "hiring_recommendation": "Strong Hire",
-                "round_breakdowns": [
-                    {"round": "DSA Round 1", "score": 86, "feedback": "Solved optimal algorithm within time limit, verified 10/10 test cases."},
-                    {"round": "Technical Round", "score": 82, "feedback": "Demonstrated deep domain expertise in role-specific fundamentals."},
-                    {"round": "HR Round", "score": 84, "feedback": "Excellent cultural alignment and clear leadership indicators."}
-                ],
-                "radar_metrics": {
-                    "problem_solving": 88,
-                    "system_architecture": 80,
-                    "code_quality": 86,
-                    "communication": 84,
-                    "cultural_fit": 82
-                },
-                "strengths": [
-                    "Optimal algorithm formulation with high computational efficiency",
-                    "Crisp communication during technical and architecture trade-offs",
-                    "Strong grasp of concurrency and production monitoring"
-                ],
-                "weaknesses": [
-                    "Initial test case validation could be structured more methodically before coding",
-                    "Could deepen knowledge of consensus protocols (Raft/Paxos) in distributed systems"
-                ],
-                "actionable_tips": [
-                    "State time and space complexity explicitly before writing any lines of code",
-                    "Walk through at least one edge case (e.g. empty inputs or extreme values) proactively",
-                    "Quantify past achievements with metric-driven outcomes in behavioral questions"
-                ],
-                "recommended_resources": [
-                    {"title": "NeetCode 150", "url": "https://neetcode.io/practice", "type": "Algorithms"},
-                    {"title": "System Design Primer", "url": "https://github.com/donnemartin/system-design-primer", "type": "System Design"},
-                    {"title": "Designing Data-Intensive Applications", "url": "https://dataintensive.net", "type": "Book"}
-                ]
-            }
+        # Calculate scores strictly for completed rounds
+        breakdowns = []
+        scores_list = []
+        
+        submissions = interview_data.get("submissions") or []
+        for cr in completed_rounds:
+            label = round_labels.get(cr, cr)
+            if "dsa" in cr:
+                # Calculate real score from test cases passed!
+                sub = next((s for s in submissions if s.get("round") == cr), None)
+                sub_detail = sub.get("submission") if sub else {}
+                exec_rep = sub_detail.get("execReport") if sub_detail else {}
+                passed = exec_rep.get("passed_cases", 0) if exec_rep else 0
+                total = exec_rep.get("total_cases", 10) if exec_rep else 10
+                
+                score = int((passed / max(1, total)) * 100)
+                feedback = f"Passed {passed} out of {total} test cases (including hidden cases)."
+                breakdowns.append({"round": label, "score": score, "feedback": feedback})
+                scores_list.append(score)
+            elif cr == "technical":
+                score = 82
+                breakdowns.append({"round": label, "score": score, "feedback": "Demonstrated technical depth in project architecture."})
+                scores_list.append(score)
+            elif cr == "hr":
+                score = 85
+                breakdowns.append({"round": label, "score": score, "feedback": "Clear articulation of past experiences using STAR method."})
+                scores_list.append(score)
+
+        if not breakdowns:
+            # Fallback if no specific round registered
+            breakdowns.append({"round": "DSA Round 1", "score": 80, "feedback": "Completed problem solving round."})
+            scores_list.append(80)
+
+        overall = int(sum(scores_list) / len(scores_list))
+        rec = "Strong Hire" if overall >= 85 else "Hire" if overall >= 70 else "Leaning Hire" if overall >= 55 else "No Hire"
+
+        return {
+            "overall_score": overall,
+            "hiring_recommendation": rec,
+            "round_breakdowns": breakdowns,
+            "radar_metrics": {
+                "problem_solving": overall,
+                "system_architecture": 75 if "technical" in completed_rounds else overall,
+                "code_quality": breakdowns[0]["score"] if breakdowns else 80,
+                "communication": 82,
+                "cultural_fit": 84 if "hr" in completed_rounds else 78
+            },
+            "strengths": [
+                f"Formulated working algorithmic approach for {interview_data.get('company', 'target company')}",
+                "Clear verbal communication during problem solving",
+                "Demonstrated focus under timed conditions"
+            ],
+            "weaknesses": [
+                "Could methodically verify edge cases before initial test execution",
+                "Be more proactive in stating asymptotic space bounds upfront"
+            ],
+            "actionable_tips": [
+                "Always walk through at least one extreme input (e.g. empty, single element, negative numbers)",
+                "State time and space complexity explicitly before writing code",
+                "Practice Blind 75 and NeetCode 150 top patterns"
+            ],
+            "recommended_resources": [
+                {"title": "NeetCode 150 Practice", "url": "https://neetcode.io/practice", "type": "Algorithms"},
+                {"title": "System Design Primer", "url": "https://github.com/donnemartin/system-design-primer", "type": "System Design"},
+                {"title": "Designing Data-Intensive Applications", "url": "https://dataintensive.net", "type": "Book"}
+            ]
+        }

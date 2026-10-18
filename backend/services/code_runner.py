@@ -4,32 +4,36 @@ import subprocess
 import tempfile
 import time
 import json
+import re
 from typing import Dict, Any, List
 
 def normalize_output(s: str) -> str:
     if s is None:
         return ""
-    # Strip whitespace, normalize boolean representations, brackets spacing
     clean = s.strip()
-    # Normalize python True/False to JSON true/false
-    if clean == "True":
+    if clean in ("True", "true"):
         return "true"
-    if clean == "False":
+    if clean in ("False", "false"):
         return "false"
-    # Try parsing json if array or object
+    
+    # Try JSON parsing (handles arrays like [0, 1] vs [0,1])
     try:
         parsed = json.loads(clean)
+        if isinstance(parsed, list):
+            # Sort if it's unordered indices or normalize
+            return json.dumps(parsed)
         return json.dumps(parsed, sort_keys=True)
     except Exception:
-        # Check if float equivalence (e.g. 2.0 vs 2.0000)
+        # Check float equivalence
         try:
             val = float(clean)
-            return str(round(val, 5))
+            return str(round(val, 4))
         except Exception:
             return clean
 
-def wrap_python_code(user_code: str, question_id: str) -> str:
-    """Creates a standalone executable Python script that reads stdin and calls the Solution method."""
+# -------------------- PYTHON RUNNER --------------------
+
+def wrap_python_code(user_code: str) -> str:
     harness = f"""
 import sys
 import json
@@ -37,13 +41,12 @@ import json
 {user_code}
 
 def main():
-    raw_input = sys.stdin.read().strip()
-    if not raw_input:
+    raw = sys.stdin.read().strip()
+    if not raw:
         return
-    lines = [line.strip() for line in raw_input.split('\\n') if line.strip()]
+    lines = [l.strip() for l in raw.split('\\n') if l.strip()]
     sol = Solution()
     
-    # Identify question method to invoke
     if hasattr(sol, 'twoSum'):
         nums = json.loads(lines[0])
         target = int(lines[1])
@@ -71,18 +74,17 @@ def main():
         nums1 = json.loads(lines[0])
         nums2 = json.loads(lines[1])
         res = sol.findMedianSortedArrays(nums1, nums2)
-        print(float(res))
+        print(round(float(res), 5))
     else:
-        # Generic fallback: look for first public method
         methods = [m for m in dir(sol) if not m.startswith('_')]
         if methods:
             fn = getattr(sol, methods[0])
             args = []
-            for line in lines:
+            for l in lines:
                 try:
-                    args.append(json.loads(line))
+                    args.append(json.loads(l))
                 except Exception:
-                    args.append(line)
+                    args.append(l)
             res = fn(*args)
             print(json.dumps(res) if isinstance(res, (list, dict)) else res)
 
@@ -91,8 +93,8 @@ if __name__ == '__main__':
 """
     return harness
 
-def run_python_solution(user_code: str, question_id: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
-    full_script = wrap_python_code(user_code, question_id)
+def run_python_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+    full_script = wrap_python_code(user_code)
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as f:
         f.write(full_script)
         script_path = f.name
@@ -115,12 +117,10 @@ def run_python_solution(user_code: str, question_id: str, test_cases: List[Dict[
                     text=True,
                     timeout=3
                 )
-                dur_ms = int((time.time() - start_t) * 1000)
+                dur_ms = max(1, int((time.time() - start_t) * 1000))
                 
                 if proc.returncode != 0:
-                    err_msg = proc.stderr.strip() or "Runtime error"
-                    # clean up filepath from traceback
-                    err_msg = err_msg.replace(script_path, "solution.py")
+                    err = proc.stderr.strip().replace(script_path, "solution.py")
                     results.append({
                         "test_index": idx + 1,
                         "hidden": hidden,
@@ -129,7 +129,7 @@ def run_python_solution(user_code: str, question_id: str, test_cases: List[Dict[
                         "actual": None,
                         "passed": False,
                         "execution_time_ms": dur_ms,
-                        "error": err_msg
+                        "error": err or "Runtime error"
                     })
                     all_passed = False
                 else:
@@ -175,10 +175,12 @@ def run_python_solution(user_code: str, question_id: str, test_cases: List[Dict[
         "results": results
     }
 
-def run_cpp_solution(user_code: str, question_id: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+# -------------------- C++ RUNNER --------------------
+
+def run_cpp_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Check if g++ available
     try:
-        subprocess.run(["g++", "--version"], capture_output=True, check=True)
+        subprocess.run(["g++.exe", "--version"], capture_output=True, check=True)
     except Exception:
         return {
             "language": "cpp",
@@ -186,15 +188,14 @@ def run_cpp_solution(user_code: str, question_id: str, test_cases: List[Dict[str
             "total_cases": len(test_cases),
             "passed_cases": 0,
             "results": [],
-            "compilation_error": "g++ compiler not found in system path."
+            "compilation_error": "g++ compiler not found in system PATH."
         }
         
-    # We compile with a C++ test harness or standard wrapper
-    # For now, let's provide cpp compilation and execution harness
     temp_dir = tempfile.mkdtemp()
     src_file = os.path.join(temp_dir, "solution.cpp")
     exe_file = os.path.join(temp_dir, "solution.exe")
-    
+
+    # Generate complete C++ harness that handles inputs
     harness = f"""
 #include <iostream>
 #include <vector>
@@ -206,16 +207,47 @@ using namespace std;
 
 {user_code}
 
+vector<int> parseVectorInt(string s) {{
+    vector<int> res;
+    string cur = "";
+    for (char c : s) {{
+        if (isdigit(c) || c == '-') {{
+            cur += c;
+        }} else if (cur.length() > 0) {{
+            res.push_back(stoi(cur));
+            cur = "";
+        }}
+    }}
+    if (cur.length() > 0) res.push_back(stoi(cur));
+    return res;
+}}
+
 int main() {{
-    // Simplified runner
-    cout << "C++ submission compiled successfully." << endl;
+    string line1, line2;
+    if (!getline(cin, line1)) return 0;
+    getline(cin, line2);
+
+    Solution sol;
+    // Two Sum check
+    if (line1.find('[') != string::npos && !line2.empty() && line2.find('[') == string::npos) {{
+        vector<int> nums = parseVectorInt(line1);
+        int target = stoi(line2);
+        vector<int> res = sol.twoSum(nums, target);
+        cout << "[";
+        for (size_t i = 0; i < res.size(); i++) {{
+            cout << res[i] << (i + 1 < res.size() ? ", " : "");
+        }}
+        cout << "]" << endl;
+        return 0;
+    }}
+    // Default output
     return 0;
 }}
 """
     with open(src_file, "w", encoding="utf-8") as f:
         f.write(harness)
-        
-    comp = subprocess.run(["g++", "-O2", src_file, "-o", exe_file], capture_output=True, text=True)
+
+    comp = subprocess.run(["g++.exe", "-O2", src_file, "-o", exe_file], capture_output=True, text=True)
     if comp.returncode != 0:
         return {
             "language": "cpp",
@@ -225,67 +257,204 @@ int main() {{
             "results": [],
             "compilation_error": comp.stderr
         }
-        
-    # Python runner can also fall back to evaluation if C++ harness is generic
-    # Return testcase results
+
+    results = []
+    all_passed = True
+    for idx, tc in enumerate(test_cases):
+        hidden = tc.get("hidden", False)
+        start_t = time.time()
+        try:
+            proc = subprocess.run([exe_file], input=tc["input"], capture_output=True, text=True, timeout=3)
+            dur_ms = max(1, int((time.time() - start_t) * 1000))
+            if proc.returncode != 0:
+                all_passed = False
+                results.append({
+                    "test_index": idx + 1,
+                    "hidden": hidden,
+                    "input": tc["input"] if not hidden else "[Hidden]",
+                    "expected": tc["expected"] if not hidden else "[Hidden]",
+                    "actual": None,
+                    "passed": False,
+                    "execution_time_ms": dur_ms,
+                    "error": proc.stderr.strip() or "Runtime error"
+                })
+            else:
+                actual_raw = proc.stdout.strip()
+                actual_norm = normalize_output(actual_raw)
+                expected = normalize_output(tc["expected"])
+                passed = (actual_norm == expected)
+                if not passed:
+                    all_passed = False
+                results.append({
+                    "test_index": idx + 1,
+                    "hidden": hidden,
+                    "input": tc["input"] if not hidden else "[Hidden]",
+                    "expected": tc["expected"] if not hidden else "[Hidden]",
+                    "actual": actual_raw if not hidden else ("[Hidden Result]" if not passed else "[Passed]"),
+                    "passed": passed,
+                    "execution_time_ms": dur_ms,
+                    "error": None
+                })
+        except subprocess.TimeoutExpired:
+            all_passed = False
+            results.append({
+                "test_index": idx + 1,
+                "hidden": hidden,
+                "input": tc["input"] if not hidden else "[Hidden]",
+                "expected": tc["expected"] if not hidden else "[Hidden]",
+                "actual": None,
+                "passed": False,
+                "execution_time_ms": 3000,
+                "error": "Time Limit Exceeded (> 3.0s)"
+            })
+
+    passed_count = sum(1 for r in results if r["passed"])
     return {
         "language": "cpp",
-        "all_passed": True,
+        "all_passed": all_passed,
         "total_cases": len(test_cases),
-        "passed_cases": len(test_cases),
-        "results": [
-            {
-                "test_index": i + 1,
-                "hidden": tc.get("hidden", False),
-                "input": tc["input"] if not tc.get("hidden") else "[Hidden]",
-                "expected": tc["expected"] if not tc.get("hidden") else "[Hidden]",
-                "actual": tc["expected"] if not tc.get("hidden") else "[Passed]",
-                "passed": True,
-                "execution_time_ms": 12,
-                "error": None
-            }
-            for i, tc in enumerate(test_cases)
-        ]
+        "passed_cases": passed_count,
+        "results": results
     }
 
-def execute_code(language: str, code: str, question_id: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
-    lang = (language or "python").lower()
-    if lang == "python":
-        return run_python_solution(code, question_id, test_cases)
-    elif lang in ("cpp", "c++"):
-        return run_cpp_solution(code, question_id, test_cases)
-    elif lang == "java":
-        # Check javac
+# -------------------- JAVA RUNNER --------------------
+
+def run_java_solution(user_code: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+    try:
+        subprocess.run(["javac", "-version"], capture_output=True, check=True)
+    except Exception:
+        return {
+            "language": "java",
+            "all_passed": False,
+            "total_cases": len(test_cases),
+            "passed_cases": 0,
+            "results": [],
+            "compilation_error": "javac compiler not found in system PATH."
+        }
+
+    temp_dir = tempfile.mkdtemp()
+    src_file = os.path.join(temp_dir, "SolutionRunner.java")
+
+    # If user code has class Solution, strip public to avoid file name mismatch
+    clean_code = re.sub(r'public\s+class\s+Solution', 'class Solution', user_code)
+
+    harness = f"""
+import java.util.*;
+import java.io.*;
+
+{clean_code}
+
+public class SolutionRunner {{
+    public static void main(String[] args) throws Exception {{
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+        String line1 = br.readLine();
+        if (line1 == null) return;
+        String line2 = br.readLine();
+
+        Solution sol = new Solution();
+        if (line1.contains("[") && line2 != null && !line2.contains("[")) {{
+            String raw = line1.replace("[", "").replace("]", "").trim();
+            String[] parts = raw.split(",");
+            int[] nums = new int[parts.length];
+            for (int i = 0; i < parts.length; i++) nums[i] = Integer.parseInt(parts[i].trim());
+            int target = Integer.parseInt(line2.trim());
+
+            int[] res = sol.twoSum(nums, target);
+            System.out.println(Arrays.toString(res));
+            return;
+        }}
+    }}
+}}
+"""
+    with open(src_file, "w", encoding="utf-8") as f:
+        f.write(harness)
+
+    comp = subprocess.run(["javac", src_file], capture_output=True, text=True, cwd=temp_dir)
+    if comp.returncode != 0:
+        return {
+            "language": "java",
+            "all_passed": False,
+            "total_cases": len(test_cases),
+            "passed_cases": 0,
+            "results": [],
+            "compilation_error": comp.stderr
+        }
+
+    results = []
+    all_passed = True
+    for idx, tc in enumerate(test_cases):
+        hidden = tc.get("hidden", False)
+        start_t = time.time()
         try:
-            subprocess.run(["javac", "-version"], capture_output=True, check=True)
-            return {
-                "language": "java",
-                "all_passed": True,
-                "total_cases": len(test_cases),
-                "passed_cases": len(test_cases),
-                "results": [
-                    {
-                        "test_index": i + 1,
-                        "hidden": tc.get("hidden", False),
-                        "input": tc["input"] if not tc.get("hidden") else "[Hidden]",
-                        "expected": tc["expected"] if not tc.get("hidden") else "[Hidden]",
-                        "actual": tc["expected"] if not tc.get("hidden") else "[Passed]",
-                        "passed": True,
-                        "execution_time_ms": 25,
-                        "error": None
-                    }
-                    for i, tc in enumerate(test_cases)
-                ]
-            }
-        except Exception:
-            return {
-                "language": "java",
-                "all_passed": False,
-                "total_cases": len(test_cases),
-                "passed_cases": 0,
-                "results": [],
-                "compilation_error": "javac compiler not found in system path."
-            }
+            proc = subprocess.run(
+                ["java", "-cp", temp_dir, "SolutionRunner"],
+                input=tc["input"],
+                capture_output=True,
+                text=True,
+                timeout=4
+            )
+            dur_ms = max(1, int((time.time() - start_t) * 1000))
+            if proc.returncode != 0:
+                all_passed = False
+                results.append({
+                    "test_index": idx + 1,
+                    "hidden": hidden,
+                    "input": tc["input"] if not hidden else "[Hidden]",
+                    "expected": tc["expected"] if not hidden else "[Hidden]",
+                    "actual": None,
+                    "passed": False,
+                    "execution_time_ms": dur_ms,
+                    "error": proc.stderr.strip() or "Runtime error"
+                })
+            else:
+                actual_raw = proc.stdout.strip()
+                actual_norm = normalize_output(actual_raw)
+                expected = normalize_output(tc["expected"])
+                passed = (actual_norm == expected)
+                if not passed:
+                    all_passed = False
+                results.append({
+                    "test_index": idx + 1,
+                    "hidden": hidden,
+                    "input": tc["input"] if not hidden else "[Hidden]",
+                    "expected": tc["expected"] if not hidden else "[Hidden]",
+                    "actual": actual_raw if not hidden else ("[Hidden Result]" if not passed else "[Passed]"),
+                    "passed": passed,
+                    "execution_time_ms": dur_ms,
+                    "error": None
+                })
+        except subprocess.TimeoutExpired:
+            all_passed = False
+            results.append({
+                "test_index": idx + 1,
+                "hidden": hidden,
+                "input": tc["input"] if not hidden else "[Hidden]",
+                "expected": tc["expected"] if not hidden else "[Hidden]",
+                "actual": None,
+                "passed": False,
+                "execution_time_ms": 4000,
+                "error": "Time Limit Exceeded (> 4.0s)"
+            })
+
+    passed_count = sum(1 for r in results if r["passed"])
+    return {
+        "language": "java",
+        "all_passed": all_passed,
+        "total_cases": len(test_cases),
+        "passed_cases": passed_count,
+        "results": results
+    }
+
+# -------------------- MAIN ENTRY --------------------
+
+def execute_code(language: str, code: str, question_id: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+    lang = (language or "python").lower().strip()
+    if lang == "python":
+        return run_python_solution(code, test_cases)
+    elif lang in ("cpp", "c++"):
+        return run_cpp_solution(code, test_cases)
+    elif lang == "java":
+        return run_java_solution(code, test_cases)
     else:
         return {
             "language": language,

@@ -1,5 +1,25 @@
 export type RoundType = 'dsa_1' | 'dsa_2' | 'technical' | 'hr';
 
+export interface NamedKey {
+  id: string;
+  name: string;
+  provider: 'gemini' | 'openai' | 'groq' | 'anthropic';
+  masked_key: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface PastInterview {
+  id: string;
+  created_at: string;
+  company: string;
+  role: string;
+  difficulty: string;
+  candidate_name: string;
+  status: string;
+  scores: any;
+}
+
 export interface InterviewConfig {
   candidate_name: string;
   dob: string;
@@ -12,6 +32,7 @@ export interface InterviewConfig {
   additional_context: string;
   provider: 'gemini' | 'openai' | 'groq' | 'anthropic';
   api_key: string;
+  key_id?: string;
   remember_key: boolean;
 }
 

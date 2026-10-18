@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { LandingScreen } from './screens/LandingScreen';
 import { SetupScreen } from './screens/SetupScreen';
 import { DSARoundScreen } from './screens/DSARoundScreen';
 import { TechnicalRoundScreen } from './screens/TechnicalRoundScreen';
@@ -6,30 +7,60 @@ import { HRRoundScreen } from './screens/HRRoundScreen';
 import { ResultsScreen } from './screens/ResultsScreen';
 import { Header } from './components/Header';
 import { FullscreenGuard } from './components/FullscreenGuard';
-import { InterviewConfig, RoundType, ChatMessage, FinalReport } from './types';
+import { InterviewConfig, RoundType, ChatMessage, FinalReport, NamedKey, PastInterview } from './types';
 import { startInterviewSession, finishInterviewSession } from './services/api';
 import { Sparkles, Loader2 } from 'lucide-react';
 
 export function App() {
   const [currentStep, setCurrentStep] = useState<
-    'setup' | 'dsa_1' | 'dsa_2' | 'technical' | 'hr' | 'generating' | 'results'
-  >('setup');
+    'landing' | 'setup' | 'dsa_1' | 'dsa_2' | 'technical' | 'hr' | 'generating' | 'results'
+  >('landing');
 
+  const [activeKey, setActiveKey] = useState<NamedKey | null>(null);
   const [config, setConfig] = useState<InterviewConfig | null>(null);
   const [sessionId, setSessionId] = useState<string>("");
   const [allTranscripts, setAllTranscripts] = useState<ChatMessage[]>([]);
   const [roundSubmissions, setRoundSubmissions] = useState<any[]>([]);
+  const [completedRounds, setCompletedRounds] = useState<RoundType[]>([]);
   const [finalReport, setFinalReport] = useState<FinalReport | null>(null);
 
   // Proctoring anti-cheat warnings
   const [warningsCount, setWarningsCount] = useState<number>(0);
   const [isProctoringActive, setIsProctoringActive] = useState<boolean>(false);
 
-  // 1. Start Interview
+  // 1. From Landing to Setup
+  const handleStartSetup = (selectedKey: NamedKey | null) => {
+    setActiveKey(selectedKey);
+    setCurrentStep('setup');
+  };
+
+  // View past report from landing history
+  const handleViewPastReport = (past: PastInterview) => {
+    setConfig({
+      candidate_name: past.candidate_name,
+      dob: "",
+      company: past.company,
+      role: past.role,
+      difficulty: past.difficulty as any,
+      selected_rounds: ['dsa_1'],
+      resume_text: "",
+      detected_skills: [],
+      additional_context: "",
+      provider: 'gemini',
+      api_key: "",
+      remember_key: false
+    });
+    setFinalReport(past.scores);
+    setAllTranscripts([]);
+    setCurrentStep('results');
+  };
+
+  // 2. Start Interview from Setup
   const handleStartInterview = async (interviewConfig: InterviewConfig) => {
     setConfig(interviewConfig);
     setWarningsCount(0);
     setIsProctoringActive(true);
+    setCompletedRounds([]);
 
     try {
       const sid = await startInterviewSession(interviewConfig);
@@ -38,7 +69,7 @@ export function App() {
       console.warn("Failed to register session with backend", e);
     }
 
-    // Determine first round from selected rounds
+    // Determine first round
     if (interviewConfig.selected_rounds.includes('dsa_1')) {
       setCurrentStep('dsa_1');
     } else if (interviewConfig.selected_rounds.includes('dsa_2')) {
@@ -52,9 +83,13 @@ export function App() {
     }
   };
 
-  // Helper to determine next round
-  const advanceToNextRound = (current: RoundType) => {
+  // Advance to next round or finish
+  const advanceToNextRound = (current: RoundType, wasCompleted: boolean) => {
     if (!config) return;
+    if (wasCompleted && !completedRounds.includes(current)) {
+      setCompletedRounds((prev) => [...prev, current]);
+    }
+
     const rounds = config.selected_rounds;
     const currentIndex = rounds.indexOf(current);
 
@@ -62,12 +97,15 @@ export function App() {
       const nextRound = rounds[currentIndex + 1];
       setCurrentStep(nextRound as any);
     } else {
-      // All selected rounds finished -> Generate assessment
-      handleFinishInterview();
+      // Finished all selected rounds
+      const finalCompleted = wasCompleted && !completedRounds.includes(current)
+        ? [...completedRounds, current]
+        : completedRounds;
+      handleFinishInterview(finalCompleted);
     }
   };
 
-  // 2. Round Completion Handlers
+  // 3. Round Handlers
   const handleDSARoundComplete = (
     roundName: RoundType,
     transcript: ChatMessage[],
@@ -75,23 +113,25 @@ export function App() {
   ) => {
     setAllTranscripts((prev) => [...prev, ...transcript]);
     setRoundSubmissions((prev) => [...prev, { round: roundName, submission }]);
-    advanceToNextRound(roundName);
+    advanceToNextRound(roundName, true);
   };
 
   const handleTechnicalComplete = (transcript: ChatMessage[]) => {
     setAllTranscripts((prev) => [...prev, ...transcript]);
-    advanceToNextRound('technical');
+    advanceToNextRound('technical', true);
   };
 
   const handleHRComplete = (transcript: ChatMessage[]) => {
     setAllTranscripts((prev) => [...prev, ...transcript]);
-    advanceToNextRound('hr');
+    advanceToNextRound('hr', true);
   };
 
-  // 3. Finish Interview & Generate Score Report
-  const handleFinishInterview = async () => {
+  // 4. Finish & Generate Score Report
+  const handleFinishInterview = async (finalCompletedList?: RoundType[]) => {
     setIsProctoringActive(false);
     setCurrentStep('generating');
+
+    const effectiveCompleted = finalCompletedList || completedRounds;
 
     const interviewPayload = {
       candidate_name: config?.candidate_name,
@@ -99,6 +139,7 @@ export function App() {
       role: config?.role,
       difficulty: config?.difficulty,
       selected_rounds: config?.selected_rounds,
+      completed_rounds: effectiveCompleted,
       resume_text: config?.resume_text,
       transcripts: allTranscripts,
       submissions: roundSubmissions,
@@ -110,7 +151,8 @@ export function App() {
         sessionId,
         interviewPayload,
         config?.provider || 'gemini',
-        config?.api_key
+        config?.api_key,
+        config?.key_id
       );
       setFinalReport(report);
       setCurrentStep('results');
@@ -120,7 +162,6 @@ export function App() {
     }
   };
 
-  // 4. Force Termination due to 3 warnings
   const handleProctoringTermination = () => {
     setIsProctoringActive(false);
     handleFinishInterview();
@@ -130,15 +171,16 @@ export function App() {
     setConfig(null);
     setAllTranscripts([]);
     setRoundSubmissions([]);
+    setCompletedRounds([]);
     setFinalReport(null);
     setWarningsCount(0);
     setIsProctoringActive(false);
-    setCurrentStep('setup');
+    setCurrentStep('landing');
   };
 
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans">
-      {/* Top Brand Navigation Header */}
+      {/* Brand Header */}
       <Header
         currentRound={
           currentStep === 'dsa_1'
@@ -155,7 +197,7 @@ export function App() {
         warningsCount={warningsCount}
       />
 
-      {/* Proctoring Fullscreen / Escape Monitor */}
+      {/* Proctoring Fullscreen / Focus Monitor */}
       <FullscreenGuard
         isActive={isProctoringActive}
         warningsCount={warningsCount}
@@ -163,10 +205,21 @@ export function App() {
         onTerminate={handleProctoringTermination}
       />
 
-      {/* Screen Router */}
+      {/* Screens */}
       <main className="flex-1 flex flex-col">
+        {currentStep === 'landing' && (
+          <LandingScreen
+            onStartSetup={handleStartSetup}
+            onViewPastReport={handleViewPastReport}
+          />
+        )}
+
         {currentStep === 'setup' && (
-          <SetupScreen onStart={handleStartInterview} />
+          <SetupScreen
+            initialKey={activeKey}
+            onBackToLanding={() => setCurrentStep('landing')}
+            onStart={handleStartInterview}
+          />
         )}
 
         {currentStep === 'dsa_1' && config && (
@@ -174,7 +227,7 @@ export function App() {
             roundName="DSA Round 1"
             config={config}
             onComplete={(tr, sub) => handleDSARoundComplete('dsa_1', tr, sub)}
-            onSkip={() => advanceToNextRound('dsa_1')}
+            onSkip={() => advanceToNextRound('dsa_1', false)}
           />
         )}
 
@@ -183,7 +236,7 @@ export function App() {
             roundName="DSA Round 2"
             config={config}
             onComplete={(tr, sub) => handleDSARoundComplete('dsa_2', tr, sub)}
-            onSkip={() => advanceToNextRound('dsa_2')}
+            onSkip={() => advanceToNextRound('dsa_2', false)}
           />
         )}
 
@@ -191,7 +244,7 @@ export function App() {
           <TechnicalRoundScreen
             config={config}
             onComplete={handleTechnicalComplete}
-            onSkip={() => advanceToNextRound('technical')}
+            onSkip={() => advanceToNextRound('technical', false)}
           />
         )}
 
@@ -199,7 +252,7 @@ export function App() {
           <HRRoundScreen
             config={config}
             onComplete={handleHRComplete}
-            onSkip={() => advanceToNextRound('hr')}
+            onSkip={() => advanceToNextRound('hr', false)}
           />
         )}
 
@@ -213,8 +266,8 @@ export function App() {
             <h2 className="text-2xl font-medium text-gray-900">
               Evaluating Interview Performance...
             </h2>
-            <p className="text-sm text-gray-500 max-w-md">
-              Synthesizing algorithmic accuracy, system architecture breadth, and STAR behavioral answers into your scorecard.
+            <p className="text-xs text-gray-500 max-w-md">
+              Synthesizing algorithmic accuracy and responses strictly from your completed rounds.
             </p>
           </div>
         )}

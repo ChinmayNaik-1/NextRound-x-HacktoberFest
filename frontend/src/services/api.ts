@@ -1,4 +1,13 @@
-import { Question, ExecutionReport, CodeAnalysis, FinalReport, InterviewConfig, RoundType } from '../types';
+import {
+  Question,
+  ExecutionReport,
+  CodeAnalysis,
+  FinalReport,
+  InterviewConfig,
+  RoundType,
+  NamedKey,
+  PastInterview
+} from '../types';
 
 const API_BASE = "http://127.0.0.1:8000/api";
 
@@ -11,42 +20,81 @@ export async function checkBackendHealth(): Promise<boolean> {
   }
 }
 
-export async function fetchSavedKeys(): Promise<{ saved_keys: Record<string, string>; active_provider: string }> {
+// ---------------- Named API Keys ----------------
+
+export async function fetchNamedKeys(): Promise<{ keys: NamedKey[]; active_key_id: string | null }> {
   try {
-    const res = await fetch(`${API_BASE}/settings/keys`);
+    const res = await fetch(`${API_BASE}/keys`);
     if (res.ok) return await res.json();
   } catch (e) {
-    console.error("fetchSavedKeys error", e);
+    console.error("fetchNamedKeys error", e);
   }
-  return { saved_keys: {}, active_provider: 'gemini' };
+  return { keys: [], active_key_id: null };
 }
 
-export async function saveApiKey(provider: string, api_key: string): Promise<boolean> {
+export async function addNamedKey(
+  name: string,
+  provider: string,
+  api_key: string,
+  verify: boolean = true
+): Promise<{ status: string; key: any; message?: string }> {
+  const res = await fetch(`${API_BASE}/keys`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, provider, api_key, verify })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed to add API key" }));
+    throw new Error(err.detail || "Failed to add key");
+  }
+  return await res.json();
+}
+
+export async function verifyApiKey(provider: string, api_key: string): Promise<{ valid: boolean; message: string }> {
   try {
-    const res = await fetch(`${API_BASE}/settings/keys`, {
+    const res = await fetch(`${API_BASE}/keys/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider, api_key })
     });
+    if (res.ok) return await res.json();
+  } catch (e: any) {
+    return { valid: false, message: e.message || "Network error during verification" };
+  }
+  return { valid: false, message: "Verification failed" };
+}
+
+export async function activateNamedKey(key_id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/keys/${key_id}/activate`, { method: "POST" });
     return res.ok;
-  } catch (e) {
-    console.error("saveApiKey error", e);
+  } catch {
     return false;
   }
 }
 
-export async function fetchRawKey(provider: string): Promise<string> {
+export async function deleteNamedKey(key_id: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/settings/raw-key/${provider}`);
-    if (res.ok) {
-      const data = await res.json();
-      return data.api_key || "";
-    }
-  } catch (e) {
-    console.error("fetchRawKey error", e);
+    const res = await fetch(`${API_BASE}/keys/${key_id}`, { method: "DELETE" });
+    return res.ok;
+  } catch {
+    return false;
   }
-  return "";
 }
+
+// ---------------- Interview History ----------------
+
+export async function fetchInterviewHistory(): Promise<PastInterview[]> {
+  try {
+    const res = await fetch(`${API_BASE}/interview/history`);
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.error("fetchInterviewHistory error", e);
+  }
+  return [];
+}
+
+// ---------------- Questions ----------------
 
 export async function fetchCompanyQuestion(company: string, difficulty: string): Promise<Question> {
   try {
@@ -55,7 +103,6 @@ export async function fetchCompanyQuestion(company: string, difficulty: string):
   } catch (e) {
     console.error("fetchCompanyQuestion error", e);
   }
-  // Fallback question if offline
   return {
     id: "two-sum",
     title: "Two Sum",
@@ -83,6 +130,8 @@ export async function fetchCompanyQuestion(company: string, difficulty: string):
   };
 }
 
+// ---------------- Real Code Execution ----------------
+
 export async function runCode(language: string, code: string, question_id: string, test_cases: any[]): Promise<ExecutionReport> {
   const res = await fetch(`${API_BASE}/code/run`, {
     method: "POST",
@@ -102,7 +151,8 @@ export async function analyzeCode(
   language: string,
   execution_results: ExecutionReport,
   provider: string,
-  api_key?: string
+  api_key?: string,
+  key_id?: string
 ): Promise<CodeAnalysis> {
   try {
     const res = await fetch(`${API_BASE}/code/analyze`, {
@@ -114,7 +164,8 @@ export async function analyzeCode(
         language,
         execution_results,
         provider,
-        api_key: api_key || ""
+        api_key: api_key || "",
+        key_id: key_id || ""
       })
     });
     if (res.ok) return await res.json();
@@ -134,6 +185,8 @@ export async function analyzeCode(
     ]
   };
 }
+
+// ---------------- Resume Parsing ----------------
 
 export async function parseResumePdf(file: File): Promise<{ raw_text: string; detected_skills: string[]; summary: string }> {
   const formData = new FormData();
@@ -155,6 +208,8 @@ export async function parseResumeText(text: string): Promise<{ raw_text: string;
   if (!res.ok) throw new Error("Failed to parse text resume");
   return await res.json();
 }
+
+// ---------------- Interview Sessions ----------------
 
 export async function startInterviewSession(config: InterviewConfig): Promise<string> {
   try {
@@ -181,7 +236,8 @@ export async function sendInterviewChat(
   resume_summary: string,
   additional_context: string,
   provider: string,
-  api_key?: string
+  api_key?: string,
+  key_id?: string
 ): Promise<string> {
   try {
     const res = await fetch(`${API_BASE}/interview/chat`, {
@@ -195,7 +251,8 @@ export async function sendInterviewChat(
         resume_summary,
         additional_context,
         provider,
-        api_key: api_key || ""
+        api_key: api_key || "",
+        key_id: key_id || ""
       })
     });
     if (res.ok) {
@@ -212,7 +269,8 @@ export async function finishInterviewSession(
   session_id: string,
   interview_data: any,
   provider: string,
-  api_key?: string
+  api_key?: string,
+  key_id?: string
 ): Promise<FinalReport> {
   try {
     const res = await fetch(`${API_BASE}/interview/finish`, {
@@ -222,7 +280,8 @@ export async function finishInterviewSession(
         session_id,
         interview_data,
         provider,
-        api_key: api_key || ""
+        api_key: api_key || "",
+        key_id: key_id || ""
       })
     });
     if (res.ok) {
@@ -236,9 +295,7 @@ export async function finishInterviewSession(
     overall_score: 85,
     hiring_recommendation: "Strong Hire",
     round_breakdowns: [
-      { round: "DSA Round", score: 88, feedback: "Solved problem with optimal O(N) complexity." },
-      { round: "Technical Round", score: 82, feedback: "Demonstrated strong CS fundamentals." },
-      { round: "HR Round", score: 85, feedback: "Great communication and culture fit." }
+      { round: "DSA Round 1", score: 88, feedback: "Solved problem with optimal O(N) complexity." }
     ],
     radar_metrics: {
       problem_solving: 88,
@@ -249,21 +306,17 @@ export async function finishInterviewSession(
     },
     strengths: [
       "Optimal algorithmic approach formulated quickly",
-      "Clear explanation during follow-up technical questions",
-      "Solid understanding of concurrency and caching"
+      "Clear explanation during follow-up technical questions"
     ],
     weaknesses: [
-      "Could proactively walk through corner edge cases earlier",
-      "Structure behavioral stories more strictly using STAR"
+      "Could proactively walk through corner edge cases earlier"
     ],
     actionable_tips: [
-      "State time and space complexity explicitly upfront",
-      "Prepare 2-3 structured STAR stories for leadership and conflict resolution"
+      "State time and space complexity explicitly upfront"
     ],
     recommended_resources: [
       { title: "NeetCode 150", url: "https://neetcode.io/practice", type: "Algorithms" },
-      { title: "System Design Primer", url: "https://github.com/donnemartin/system-design-primer", type: "Architecture" },
-      { title: "Designing Data-Intensive Applications", url: "https://dataintensive.net", type: "Book" }
+      { title: "System Design Primer", url: "https://github.com/donnemartin/system-design-primer", type: "Architecture" }
     ]
   };
 }
